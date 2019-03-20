@@ -1,4 +1,4 @@
-# Deep Bi-Directional Network based Ensemble for Aerial Image Registration
+# TBA
 
 Pytorch implementation of our proposed method for aerial image registration.
 
