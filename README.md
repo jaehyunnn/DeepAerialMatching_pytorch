@@ -1,6 +1,6 @@
 # Deep Aerial Image Matching Implementation
 
-![](overview_figure.png)
+![](overview_figure.png){: width="50%" height="50%"}
 
 This is the official implementation of the paper: 
 
