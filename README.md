@@ -1,6 +1,8 @@
 # Deep Aerial Image Matching Implementation
 
-<center><img src="overview_figure.png" width="300"></center>
+<p align="center">
+  <img src="overview_figure.png" width="400">
+</p>
 
 This is the official implementation of the paper: 
 
