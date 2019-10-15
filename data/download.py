@@ -1,5 +1,3 @@
-r"""Functions to download semantic correspondence datasets"""
-
 from os.path import exists, join, basename
 from os import makedirs, remove
 from google_drive_downloader import GoogleDriveDownloader as gdd
