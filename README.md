@@ -6,7 +6,7 @@
 
 This is the official implementation of the paper: 
 
-J.H. Park, W.-J. Nam and S.-W. Lee, "Three-Stream Symmetric Network with Bidirectional Ensemble for Aerial Image Matching," *Pattern Recognition* (under-review).
+J.-H. Park, W.-J. Nam and S.-W. Lee, "Three-Stream Symmetric Network with Bidirectional Ensemble for Aerial Image Matching," *Pattern Recognition* (under-review).
 
 using PyTorch 
 ## Required package ###
