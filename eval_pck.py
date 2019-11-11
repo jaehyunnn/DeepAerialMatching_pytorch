@@ -19,7 +19,7 @@ if __name__ == '__main__':
     print_info('[Deep Aerial Matching] Evaluation Script', ['green', 'bold'])
 
     # Argument parser
-    parser = argparse.ArgumentParser(description='Deep Aerial Registration PyTorch Implementation')
+    parser = argparse.ArgumentParser(description='Deep Aerial Matching PyTorch Implementation')
     # Paths
     parser.add_argument('--model-aff', type=str, default='trained_models/checkpoint_seresnext101.pth.tar', help='Trained affine model filename')
     parser.add_argument('--batch-size', type=int, default=16, help='Test batch size')
