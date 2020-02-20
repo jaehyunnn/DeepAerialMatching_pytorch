@@ -7,7 +7,7 @@
 This is the official implementation of the paper: 
 
 J.-H. Park, W.-J Nam and S.-W Lee, "**A Two-Stream Symmetric Network with Bidirectional Ensemble for Aerial Image Matching**,"  *Remote Sens.*, 2020, Vol. 12, No. 6, pp. 465 <br>
-[[website](https://doi.org/10.3390/rs12030465)][[arXiv](https://arxiv.org/abs/2002.01325)]
+[[Journal](https://doi.org/10.3390/rs12030465)][[arXiv](https://arxiv.org/abs/2002.01325)]
 
 ## Required package ###
   - Python 3
