@@ -4,7 +4,7 @@ from torch.autograd import Variable
 from torchvision.transforms import Normalize
 
 import torch
-from model.AerialNet_two_stream import net
+from model.AerialNet import net_single_stream as net
 from image.normalization import NormalizeImageDict, normalize_image
 from util.checkboard import createCheckBoard
 from geotnf.transformation import GeometricTnf, theta2homogeneous
@@ -24,7 +24,7 @@ import time
 
 warnings.filterwarnings('ignore')
 
-torch.cuda.set_device(1)
+# torch.cuda.set_device(1) # Using second GPU
 
 ### Parameter
 feature_extraction_cnn = 'se_resnext101'

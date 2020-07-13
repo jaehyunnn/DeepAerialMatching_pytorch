@@ -117,15 +117,60 @@ class FeatureRegression(nn.Module):
         x = self.linear(x)
         return x
 
-
-class net(nn.Module):
+class net_single_stream(nn.Module):
     def __init__(self, geometric_model='affine',
                  normalize_features=True,
                  normalize_matches=True, batch_normalization=True,
                  use_cuda=True,
                  feature_extraction_cnn='se_resnext101',
                  train_fe=False):
-        super(net, self).__init__()
+        super(net_single_stream, self).__init__()
+        self.use_cuda = use_cuda
+        self.normalize_features = normalize_features
+        self.normalize_matches = normalize_matches
+        self.FeatureExtraction = FeatureExtraction(train_fe=train_fe,
+                                                   use_cuda=self.use_cuda,
+                                                   feature_extraction_cnn=feature_extraction_cnn)
+        self.FeatureL2Norm = FeatureL2Norm()
+        self.LocalPreserve = nn.AvgPool2d(kernel_size=3, stride=1)
+        self.FeatureCorrelation = FeatureCorrelation()
+        if geometric_model=='affine':
+            output_dim = 6
+        self.FeatureRegression = FeatureRegression(output_dim, use_cuda=self.use_cuda)
+        self.ReLU = nn.ReLU(inplace=True)
+
+    def forward(self, tnf_batch):
+        # do feature extraction
+        feature_A = self.FeatureExtraction(tnf_batch['source_image'])
+        feature_B = self.FeatureExtraction(tnf_batch['target_image'])
+        # normalize (feature maps)
+        if self.normalize_features:
+            feature_A = self.FeatureL2Norm(feature_A)
+            feature_B = self.FeatureL2Norm(feature_B)
+
+        # do feature correlation symmetrically
+        correlation_AB = self.FeatureCorrelation(feature_A,feature_B)
+        correlation_BA = self.FeatureCorrelation(feature_B,feature_A)
+
+        # normalize (correlation maps)
+        if self.normalize_matches:
+            correlation_AB = self.FeatureL2Norm(self.ReLU(correlation_AB))
+            correlation_BA = self.FeatureL2Norm(self.ReLU(correlation_BA))
+
+        # do regression to tnf parameters theta
+        theta_AB = self.FeatureRegression(correlation_AB)
+        theta_BA = self.FeatureRegression(correlation_BA)
+
+        return theta_AB, theta_BA
+
+class net_two_stream(nn.Module):
+    def __init__(self, geometric_model='affine',
+                 normalize_features=True,
+                 normalize_matches=True, batch_normalization=True,
+                 use_cuda=True,
+                 feature_extraction_cnn='se_resnext101',
+                 train_fe=False):
+        super(net_two_stream, self).__init__()
         self.use_cuda = use_cuda
         self.normalize_features = normalize_features
         self.normalize_matches = normalize_matches

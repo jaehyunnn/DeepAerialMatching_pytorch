@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
 # import network
-from model.AerialNet import net
+from model.AerialNet import net_two_stream as net
 from model.loss import TransformedGridLoss
 from data.download import download_train
 from data.synth_dataset import SynthDataset
@@ -20,7 +20,7 @@ from util.torch_util import save_checkpoint, str_to_bool, print_info
 import pickle
 from functools import partial
 
-# torch.cuda.set_device(1)
+# torch.cuda.set_device(1) # Using second GPU
 
 pickle.load = partial(pickle.load, encoding="latin1")
 pickle.Unpickler = partial(pickle.Unpickler, encoding="latin1")
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     print_info('[Deep Aerial Matching] training script',['green','bold'])
 
     # Argument parsing
-    parser = argparse.ArgumentParser(description='Deep Aerial Registration PyTorch Implementation')
+    parser = argparse.ArgumentParser(description='Deep Aerial Matching PyTorch Implementation')
     # Paths
     parser.add_argument('--training-dataset', type=str, default='GoogleEarth', help='dataset to use for training')
     parser.add_argument('--training-tnf-csv', type=str, default='', help='path to training transformation csv folder')

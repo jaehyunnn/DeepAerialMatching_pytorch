@@ -13,7 +13,7 @@ from geotnf.transformation import GeometricTnf, SynthPairTnf_pck
 import numpy as np
 from tqdm import tqdm
 
-torch.cuda.set_device(1) # Using second GPU
+# torch.cuda.set_device(1) # Using second GPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if __name__ == '__main__':
     print_info('[Deep Aerial Matching] Evaluation Script', ['green', 'bold'])
