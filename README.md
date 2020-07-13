@@ -33,3 +33,14 @@ Note that, models must be downloaded to the 'trained_models' folder.
 | Densenet169      | 95.6 %            | 88.4 %            | 44.0 %            | [[here]](https://docs.google.com/uc?id=1DsAdFOUpqZDLwONtcTe3NE4ZWtwZquOK) |
 | SE-ResNeXt101    | **97.1 %**            | **91.1 %**            | **48.0 %**            | [[here]](https://docs.google.com/uc?id=1vTj9Kk7bQPEOKwtm_TE3gqqcPyuv-x3i) |
 
+## Paper Citation ###
+
+	@misc{park2020aerial,
+	title={A Two-Stream Symmetric Network with Bidirectional Ensemble for Aerial Image Matching},
+	author={Jae-Hyun Park and Woo-Jeoung Nam and Seong-Whan Lee},
+	year={2020},
+	eprint={2002.01325},
+	archivePrefix={arXiv},
+	primaryClass={cs.CV}
+	}
+
