@@ -1,7 +1,7 @@
 # Deep Aerial Image Matching Implementation
 
 <p align="center">
-  <img src="overview_figure.png" width="400">
+  <img src="https://www.mdpi.com/remotesensing/remotesensing-12-00465/article_deploy/html/images/remotesensing-12-00465-ag-550.jpg" width="400">
 </p>
 
 This is the official implementation of the paper: 
