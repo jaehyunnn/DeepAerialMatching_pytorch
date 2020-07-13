@@ -3,7 +3,7 @@ import os
 import argparse
 import torch
 from torch.utils.data import Dataset, DataLoader
-from model.AerialNet_two_stream import net
+from model.AerialNet import net_single_stream as net
 from data.pck_dataset import GoogleEarthPCK
 from data.download import download_eval
 from image.normalization import NormalizeImageDict
