@@ -1,0 +1,14 @@
+# DenseNet169 Configuration (Lightweight)
+
+model:
+  backbone: densenet169
+  geometric_model: affine
+  train_feature_extraction: true
+
+training:
+  batch_size: 16  # Can use larger batch due to smaller model
+  num_epochs: 100
+  learning_rate: 0.0004
+
+checkpoint:
+  name: checkpoint_densenet169

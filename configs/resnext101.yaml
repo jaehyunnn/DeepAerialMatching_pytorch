@@ -1,0 +1,14 @@
+# ResNeXt101 Configuration
+
+model:
+  backbone: resnext101
+  geometric_model: affine
+  train_feature_extraction: true
+
+training:
+  batch_size: 10
+  num_epochs: 100
+  learning_rate: 0.0004
+
+checkpoint:
+  name: checkpoint_resnext101

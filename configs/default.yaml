@@ -1,0 +1,43 @@
+# Deep Aerial Matching - Default Configuration
+
+# Model settings
+model:
+  backbone: se_resnext101  # resnet101, resnext101, se_resnext101, densenet169, vgg
+  geometric_model: affine
+  train_feature_extraction: true
+
+# Training settings
+training:
+  batch_size: 12
+  num_epochs: 100
+  learning_rate: 0.0004
+  weight_decay: 0.0
+  momentum: 0.9
+  seed: 1
+  num_workers: 4
+  log_interval: 100
+
+# Loss settings
+loss:
+  type: grid  # grid or mse
+  grid_size: 20
+  alpha: 0.5
+  beta: 0.3
+  gamma: 0.2
+
+# Dataset settings
+dataset:
+  name: GoogleEarth
+  image_path: datasets/training_data/
+  csv_path: datasets/training_data
+  random_sample: false
+
+# Paths
+paths:
+  checkpoints: checkpoints/
+  results: results/
+
+# Checkpoint settings
+checkpoint:
+  save_every: 1
+  load_from: null  # path to checkpoint to resume from

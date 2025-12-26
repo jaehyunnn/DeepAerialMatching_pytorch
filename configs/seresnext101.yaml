@@ -1,0 +1,14 @@
+# SE-ResNeXt101 Configuration (Best Performance)
+
+model:
+  backbone: se_resnext101
+  geometric_model: affine
+  train_feature_extraction: true
+
+training:
+  batch_size: 8  # Reduced due to larger model
+  num_epochs: 100
+  learning_rate: 0.0004
+
+checkpoint:
+  name: checkpoint_seresnext101
