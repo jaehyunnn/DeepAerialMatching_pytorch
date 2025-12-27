@@ -1,22 +1,22 @@
 """Utility functions for training, evaluation, and checkpoints."""
 
-from .torch_util import (
-    BatchTensorToVars,
-    save_checkpoint,
-    load_checkpoint,
-    str_to_bool,
-    print_info,
-)
-from .train_test_fn import train, test
-from .checkboard import createCheckBoard
+from .checkpoint import load_checkpoint, save_checkpoint
+from .cli_utils import str_to_bool
+from .tensor import BatchToDevice
+from .training import train_epoch, validate
+from .visualization import create_checkerboard
 
 __all__ = [
-    "BatchTensorToVars",
+    # Checkpoint
     "save_checkpoint",
     "load_checkpoint",
+    # CLI
     "str_to_bool",
-    "print_info",
-    "train",
-    "test",
-    "createCheckBoard",
+    # Tensor
+    "BatchToDevice",
+    # Training
+    "train_epoch",
+    "validate",
+    # Visualization
+    "create_checkerboard",
 ]

@@ -1,7 +1,7 @@
 # Deep Aerial Image Matching
 
 <p align="center">
-  <img src="https://www.mdpi.com/remotesensing/remotesensing-12-00465/article_deploy/html/images/remotesensing-12-00465-ag-550.jpg" width="400">
+  <img src="assets/overview.png" width="400">
 </p>
 
 Official PyTorch implementation of:
@@ -13,7 +13,12 @@ Official PyTorch implementation of:
 
 ## 🎁 Updates
 
-**2025-12-27**
+**2025-12-27 (DeepAerialNet v2.0)**
+- **DINOv3 ViT backbone**: Added `dinov3` (ViT-Large) as a new backbone option
+- **LoFTR-style cross-attention correlation**: New correlation type with transformer cross-attention and 2D positional encoding (`--correlation-type cross_attention`)
+- **CoordConv regression**: Optional normalized coordinate channels for regression head (`add_coord=True`)
+
+**2025-12-26**
 - Migrated pretrained models and datasets to [Hugging Face Hub](https://huggingface.co/jaehyunnn/DeepAerialMatching)
 - Replaced `pretrainedmodels` with `timm` library for modern backbone support
 - Added `uv` support for fast environment setup
@@ -80,13 +85,37 @@ python src/data/download.py          # All datasets
 
 ```bash
 # Demo
-python src/cli/demo.py
+./scripts/demo.sh
+./scripts/demo.sh --backbone resnet101 --model checkpoints/checkpoint_resnet101.pt
+./scripts/demo.sh --backbone dinov3 --correlation-type cross_attention
 
 # Evaluation
-./scripts/eval.sh --model checkpoints/checkpoint_seresnext101.pt --cnn se_resnext101
+./scripts/eval.sh
+./scripts/eval.sh --backbone resnet101 --model checkpoints/checkpoint_resnet101.pt
 
 # Training
-python src/cli/train.py --feature-extraction-cnn se_resnext101
+./scripts/train.sh
+./scripts/train.sh --backbone resnet101 --num-epochs 50
+./scripts/train.sh --backbone dinov3 --freeze-backbone --correlation-type cross_attention
+```
+
+### Available Options
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `--backbone` | `resnet101`, `resnext101`, `se_resnext101`, `densenet169`, `dinov3` | Feature extraction backbone |
+| `--correlation-type` | `dot`, `cross_attention` | Correlation method (dot: simple dot product, cross_attention: LoFTR-style) |
+| `--freeze-backbone` | flag | Freeze backbone weights during training |
+
+### Model Architecture
+
+```
+src/models/
+├── backbone.py      # FeatureExtraction (CNN/ViT backbones)
+├── correlation.py   # FeatureCorrelation, CrossAttentionCorrelation
+├── layers.py        # FeatureL2Norm, FeatureRegression
+├── aerial_net.py    # AerialNetSingleStream, AerialNetTwoStream
+└── loss.py          # TransformedGridLoss
 ```
 
 ## Requirements

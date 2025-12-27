@@ -1,42 +1,76 @@
+"""Point transformation utilities for coordinate manipulation."""
+from __future__ import annotations
+
 import torch
 
-class PointTnf(object):
+
+class PointTnf:
+    """Transform points with affine transformations.
+
+    Args:
+        use_cuda: Whether to use CUDA (kept for API compatibility).
     """
 
-    Class with functions for transforming a set of points with affine transformations
-
-    """
-
-    def __init__(self, use_cuda=True):
+    def __init__(self, use_cuda: bool = True):
         self.use_cuda = use_cuda
 
-    def affPointTnf(self, theta, points):
+    def affine_transform(self, theta: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
+        """Apply affine transformation to points.
+
+        Args:
+            theta: Affine matrix (B, 6) or (B, 2, 3).
+            points: Points to transform (B, 2, N).
+
+        Returns:
+            Transformed points (B, 2, N).
+        """
         theta_mat = theta.view(-1, 2, 3)
+        # Apply rotation/scale
         warped_points = torch.bmm(theta_mat[:, :, :2], points)
-        warped_points += theta_mat[:, :, 2].unsqueeze(2).expand_as(warped_points)
+        # Apply translation
+        warped_points = warped_points + theta_mat[:, :, 2:3]
         return warped_points
 
-    # Normalize Coordinates (-1. ~ 1.)
+
+def points_to_unit_coords(points: torch.Tensor, im_size: torch.Tensor) -> torch.Tensor:
+    """Convert pixel coordinates to normalized coordinates (-1 to 1).
+
+    Args:
+        points: Points in pixel coordinates (B, 2, N).
+        im_size: Image size (B, 2) where [:, 0] is height and [:, 1] is width.
+
+    Returns:
+        Points in normalized coordinates (B, 2, N).
+    """
+    h = im_size[:, 0:1].float()  # (B, 1)
+    w = im_size[:, 1:2].float()  # (B, 1)
+
+    points_norm = points.clone()
+    # Normalize X (dim 0): pixel -> [-1, 1]
+    points_norm[:, 0, :] = (points[:, 0, :] - 1 - (w - 1) / 2) * 2 / (w - 1)
+    # Normalize Y (dim 1): pixel -> [-1, 1]
+    points_norm[:, 1, :] = (points[:, 1, :] - 1 - (h - 1) / 2) * 2 / (h - 1)
+
+    return points_norm
 
 
-def PointsToUnitCoords(P, im_size):
-    h, w = im_size[:, 0], im_size[:, 1]
-    NormAxis = lambda x, L: (x - 1 - (L - 1) / 2) * 2 / (L - 1)
-    P_norm = P.clone()
-    # normalize Y
-    P_norm[:, 0, :] = NormAxis(P[:, 0, :], w.unsqueeze(1).expand_as(P[:, 0, :]).float())
-    # normalize X
-    P_norm[:, 1, :] = NormAxis(P[:, 1, :], h.unsqueeze(1).expand_as(P[:, 1, :]).float())
-    return P_norm
+def points_to_pixel_coords(points: torch.Tensor, im_size: torch.Tensor) -> torch.Tensor:
+    """Convert normalized coordinates (-1 to 1) to pixel coordinates.
 
+    Args:
+        points: Points in normalized coordinates (B, 2, N).
+        im_size: Image size (B, 2) where [:, 0] is height and [:, 1] is width.
 
-# Unormalize Coordinates
-def PointsToPixelCoords(P, im_size):
-    h, w = im_size[:, 0], im_size[:, 1]
-    NormAxis = lambda x, L: x * (L - 1) / 2 + 1 + (L - 1) / 2
-    P_norm = P.clone()
-    # normalize Y
-    P_norm[:, 0, :] = NormAxis(P[:, 0, :], w.unsqueeze(1).expand_as(P[:, 0, :]))
-    # normalize X
-    P_norm[:, 1, :] = NormAxis(P[:, 1, :], h.unsqueeze(1).expand_as(P[:, 1, :]))
-    return P_norm
+    Returns:
+        Points in pixel coordinates (B, 2, N).
+    """
+    h = im_size[:, 0:1].float()  # (B, 1)
+    w = im_size[:, 1:2].float()  # (B, 1)
+
+    points_pixel = points.clone()
+    # Denormalize X (dim 0): [-1, 1] -> pixel
+    points_pixel[:, 0, :] = points[:, 0, :] * (w - 1) / 2 + 1 + (w - 1) / 2
+    # Denormalize Y (dim 1): [-1, 1] -> pixel
+    points_pixel[:, 1, :] = points[:, 1, :] * (h - 1) / 2 + 1 + (h - 1) / 2
+
+    return points_pixel

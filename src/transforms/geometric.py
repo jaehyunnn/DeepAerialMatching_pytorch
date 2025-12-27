@@ -1,138 +1,270 @@
-from __future__ import print_function, division
-import numpy as np
+"""Geometric transformation utilities for image warping."""
+from __future__ import annotations
+
 import torch
-from torch.nn.modules.module import Module
+import torch.nn as nn
 import torch.nn.functional as F
 
 
-class GeometricTnf(object):
+class AffineGridGen(nn.Module):
+    """Generate affine transformation grid for grid_sample.
+
+    Args:
+        out_h: Output height.
+        out_w: Output width.
     """
 
-    Geometric transfromation to an image batch (wrapped in a PyTorch Variable)
-    ( can be used with no transformation to perform bilinear resizing )
+    def __init__(self, out_h: int = 240, out_w: int = 240):
+        super().__init__()
+        self.out_h = out_h
+        self.out_w = out_w
 
+    def forward(self, theta: torch.Tensor) -> torch.Tensor:
+        """Generate affine grid.
+
+        Args:
+            theta: Affine transformation matrix (B, 2, 3).
+
+        Returns:
+            Sampling grid (B, H, W, 2).
+        """
+        batch_size = theta.size(0)
+        out_size = torch.Size((batch_size, 1, self.out_h, self.out_w))
+        return F.affine_grid(theta.contiguous(), out_size, align_corners=False)
+
+
+class GeometricTnf:
+    """Geometric transformation for image batches.
+
+    Applies affine transformations with optional resizing.
+
+    Args:
+        geometric_model: Type of geometric model ('affine').
+        out_h: Output height.
+        out_w: Output width.
+        use_cuda: Whether to use CUDA.
     """
 
-    def __init__(self, geometric_model='affine', out_h=240, out_w=240, use_cuda=True):
+    def __init__(
+        self,
+        geometric_model: str = 'affine',
+        out_h: int = 240,
+        out_w: int = 240,
+        use_cuda: bool = True,
+    ):
         self.out_h = out_h
         self.out_w = out_w
         self.use_cuda = use_cuda
+
         if geometric_model == 'affine':
-            self.gridGen = AffineGridGen(out_h, out_w)
-        self.theta_identity = torch.Tensor(np.expand_dims(np.array([[1, 0, 0], [0, 1, 0]]), 0).astype(np.float32))
+            self.grid_gen = AffineGridGen(out_h, out_w)
+
+        # Identity transformation matrix
+        self.theta_identity = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]])
         if use_cuda:
             self.theta_identity = self.theta_identity.cuda()
 
-    def __call__(self, image_batch, theta_batch=None, padding_factor=1.0, crop_factor=1.0):
-        b, c, h, w = image_batch.size()
+    def __call__(
+        self,
+        image_batch: torch.Tensor,
+        theta_batch: torch.Tensor | None = None,
+        padding_factor: float = 1.0,
+        crop_factor: float = 1.0,
+    ) -> torch.Tensor:
+        """Apply geometric transformation to image batch.
+
+        Args:
+            image_batch: Input images (B, C, H, W).
+            theta_batch: Transformation matrices (B, 2, 3). If None, uses identity.
+            padding_factor: Padding scale factor.
+            crop_factor: Crop scale factor.
+
+        Returns:
+            Warped images (B, C, out_h, out_w).
+        """
+        batch_size = image_batch.size(0)
+
         if theta_batch is None:
-            theta_batch = self.theta_identity.expand(b, 2, 3).to(image_batch.device)
+            theta_batch = self.theta_identity.expand(batch_size, 2, 3).to(image_batch.device)
 
-        sampling_grid = self.gridGen(theta_batch)
-
-        # rescale grid according to crop_factor and padding_factor
+        sampling_grid = self.grid_gen(theta_batch)
         sampling_grid = sampling_grid * padding_factor * crop_factor
-        # sample transformed image
-        warped_image_batch = F.grid_sample(image_batch, sampling_grid, align_corners=False)
 
-        return warped_image_batch
+        return F.grid_sample(image_batch, sampling_grid, align_corners=False)
 
 
-def symmetric_image_pad(image_batch, padding_factor):
-    """Apply symmetric padding to image batch for larger sampling region."""
-    b, c, h, w = image_batch.size()
-    pad_h, pad_w = int(h * padding_factor), int(w * padding_factor)
+def symmetric_image_pad(image_batch: torch.Tensor, padding_factor: float) -> torch.Tensor:
+    """Apply symmetric (reflection) padding to image batch.
+
+    Args:
+        image_batch: Input images (B, C, H, W).
+        padding_factor: Fraction of image size to pad.
+
+    Returns:
+        Padded images.
+    """
+    _, _, h, w = image_batch.size()
+    pad_h = int(h * padding_factor)
+    pad_w = int(w * padding_factor)
     device = image_batch.device
 
-    idx_pad_left = torch.arange(pad_w - 1, -1, -1, device=device)
-    idx_pad_right = torch.arange(w - 1, w - pad_w - 1, -1, device=device)
-    idx_pad_top = torch.arange(pad_h - 1, -1, -1, device=device)
-    idx_pad_bottom = torch.arange(h - 1, h - pad_h - 1, -1, device=device)
+    # Create reflection indices
+    idx_left = torch.arange(pad_w - 1, -1, -1, device=device)
+    idx_right = torch.arange(w - 1, w - pad_w - 1, -1, device=device)
+    idx_top = torch.arange(pad_h - 1, -1, -1, device=device)
+    idx_bottom = torch.arange(h - 1, h - pad_h - 1, -1, device=device)
 
-    image_batch = torch.cat((image_batch.index_select(3, idx_pad_left), image_batch,
-                             image_batch.index_select(3, idx_pad_right)), 3)
-    image_batch = torch.cat((image_batch.index_select(2, idx_pad_top), image_batch,
-                             image_batch.index_select(2, idx_pad_bottom)), 2)
+    # Apply horizontal padding
+    image_batch = torch.cat([
+        image_batch.index_select(3, idx_left),
+        image_batch,
+        image_batch.index_select(3, idx_right),
+    ], dim=3)
+
+    # Apply vertical padding
+    image_batch = torch.cat([
+        image_batch.index_select(2, idx_top),
+        image_batch,
+        image_batch.index_select(2, idx_bottom),
+    ], dim=2)
+
     return image_batch
 
 
-class SynthPairTnfBase(object):
-    """Base class for synthetic pair transformation."""
+class SynthPairTnf:
+    """Generate synthetically warped training pairs.
 
-    def __init__(self, use_cuda=True, geometric_model='affine', crop_factor=9/16,
-                 output_size=(240, 240), padding_factor=0.5):
+    Creates source-target pairs with geometric transformations for training.
+
+    Args:
+        use_cuda: Whether to use CUDA.
+        geometric_model: Type of geometric model.
+        crop_factor: Crop scale factor.
+        output_size: Output image size (H, W).
+        padding_factor: Padding scale factor.
+    """
+
+    def __init__(
+        self,
+        use_cuda: bool = True,
+        geometric_model: str = 'affine',
+        crop_factor: float = 9 / 16,
+        output_size: tuple[int, int] = (240, 240),
+        padding_factor: float = 0.5,
+    ):
         self.use_cuda = use_cuda
         self.device = torch.device('cuda' if use_cuda else 'cpu')
         self.crop_factor = crop_factor
         self.padding_factor = padding_factor
         self.out_h, self.out_w = output_size
-        self.rescalingTnf = GeometricTnf('affine', self.out_h, self.out_w, use_cuda=use_cuda)
-        self.geometricTnf = GeometricTnf(geometric_model, self.out_h, self.out_w, use_cuda=use_cuda)
+
+        self.rescaling_tnf = GeometricTnf('affine', self.out_h, self.out_w, use_cuda=use_cuda)
+        self.geometric_tnf = GeometricTnf(geometric_model, self.out_h, self.out_w, use_cuda=use_cuda)
+
+    def __call__(self, batch: dict) -> dict:
+        """Apply synthetic transformation to batch.
+
+        Args:
+            batch: Dict with 'src_image', 'trg_image', 'trg_image_jit', 'theta'.
+
+        Returns:
+            Dict with 'source_image', 'target_image', 'target_image_jit', 'theta_GT'.
+        """
+        src_image = batch['src_image'].to(self.device)
+        trg_image = batch['trg_image'].to(self.device)
+        trg_image_jit = batch['trg_image_jit'].to(self.device)
+        theta = batch['theta'].to(self.device)
+
+        # Apply symmetric padding
+        src_image = symmetric_image_pad(src_image, self.padding_factor)
+        trg_image = symmetric_image_pad(trg_image, self.padding_factor)
+        trg_image_jit = symmetric_image_pad(trg_image_jit, self.padding_factor)
+
+        # Crop source and warp targets
+        source_image = self.rescaling_tnf(src_image, None, self.padding_factor, self.crop_factor)
+        target_image = self.geometric_tnf(trg_image, theta, self.padding_factor, self.crop_factor)
+        target_image_jit = self.geometric_tnf(trg_image_jit, theta, self.padding_factor, self.crop_factor)
+
+        return {
+            'source_image': source_image,
+            'target_image': target_image,
+            'target_image_jit': target_image_jit,
+            'theta_GT': theta,
+        }
 
 
-class SynthPairTnf(SynthPairTnfBase):
-    """Generate synthetically warped training pair with jittered target."""
+class SynthPairTnfPCK:
+    """Generate synthetically warped pairs for PCK evaluation.
 
-    def __call__(self, batch):
-        src_image_batch = batch['src_image'].to(self.device)
-        trg_image_batch = batch['trg_image'].to(self.device)
-        trg_image_jit_batch = batch['trg_image_jit'].to(self.device)
-        theta_batch = batch['theta'].to(self.device)
+    Similar to SynthPairTnf but without jittered target.
 
-        # generate symmetrically padded image for bigger sampling region
-        src_image_batch = symmetric_image_pad(src_image_batch, self.padding_factor)
-        trg_image_batch = symmetric_image_pad(trg_image_batch, self.padding_factor)
-        trg_image_jit_batch = symmetric_image_pad(trg_image_jit_batch, self.padding_factor)
+    Args:
+        use_cuda: Whether to use CUDA.
+        geometric_model: Type of geometric model.
+        crop_factor: Crop scale factor.
+        output_size: Output image size (H, W).
+        padding_factor: Padding scale factor.
+    """
 
-        # get cropped image (Identity is used as no theta given)
-        cropped_image_batch = self.rescalingTnf(src_image_batch, None, self.padding_factor, self.crop_factor)
-        # get transformed image
-        warped_image_batch = self.geometricTnf(trg_image_batch, theta_batch, self.padding_factor, self.crop_factor)
-        warped_image_jit_batch = self.geometricTnf(trg_image_jit_batch, theta_batch, self.padding_factor, self.crop_factor)
+    def __init__(
+        self,
+        use_cuda: bool = True,
+        geometric_model: str = 'affine',
+        crop_factor: float = 9 / 16,
+        output_size: tuple[int, int] = (240, 240),
+        padding_factor: float = 0.5,
+    ):
+        self.use_cuda = use_cuda
+        self.crop_factor = crop_factor
+        self.padding_factor = padding_factor
+        self.out_h, self.out_w = output_size
 
-        return {'source_image': cropped_image_batch, 'target_image': warped_image_batch,
-                'target_image_jit': warped_image_jit_batch, 'theta_GT': theta_batch}
+        self.rescaling_tnf = GeometricTnf('affine', self.out_h, self.out_w, use_cuda=use_cuda)
+        self.geometric_tnf = GeometricTnf(geometric_model, self.out_h, self.out_w, use_cuda=use_cuda)
+
+    def __call__(self, batch: dict) -> dict:
+        """Apply synthetic transformation to batch.
+
+        Args:
+            batch: Dict with 'src_image', 'trg_image', 'theta'.
+
+        Returns:
+            Dict with 'source_image', 'target_image'.
+        """
+        src_image = batch['src_image']
+        trg_image = batch['trg_image']
+        theta = batch['theta']
+
+        # Apply symmetric padding
+        src_image = symmetric_image_pad(src_image, self.padding_factor)
+        trg_image = symmetric_image_pad(trg_image, self.padding_factor)
+
+        # Crop source and warp target
+        source_image = self.rescaling_tnf(src_image, None, self.padding_factor, self.crop_factor)
+        target_image = self.geometric_tnf(trg_image, theta, self.padding_factor, self.crop_factor)
+
+        return {
+            'source_image': source_image,
+            'target_image': target_image,
+        }
 
 
-class SynthPairTnf_pck(SynthPairTnfBase):
-    """Generate synthetically warped test pair for PCK evaluation."""
+def theta2homogeneous(theta: torch.Tensor) -> torch.Tensor:
+    """Convert 2x3 affine matrix to 3x3 homogeneous matrix.
 
-    def __call__(self, batch):
-        src_image_batch = batch['src_image']
-        trg_image_batch = batch['trg_image']
-        theta_batch = batch['theta']
+    Args:
+        theta: Affine matrix (B, 6) or (B, 2, 3).
 
-        # generate symmetrically padded image for bigger sampling region
-        src_image_batch = symmetric_image_pad(src_image_batch, self.padding_factor)
-        trg_image_batch = symmetric_image_pad(trg_image_batch, self.padding_factor)
-
-        # get cropped image (Identity is used as no theta given)
-        cropped_image_batch = self.rescalingTnf(src_image_batch, None, self.padding_factor, self.crop_factor)
-        # get transformed image
-        warped_image_batch = self.geometricTnf(trg_image_batch, theta_batch, self.padding_factor, self.crop_factor)
-
-        return {'source_image': cropped_image_batch, 'target_image': warped_image_batch}
-
-
-class AffineGridGen(Module):
-    def __init__(self, out_h=240, out_w=240, out_ch=3):
-        super(AffineGridGen, self).__init__()
-        self.out_h = out_h
-        self.out_w = out_w
-        self.out_ch = out_ch
-
-    def forward(self, theta):
-        theta = theta.contiguous()
-        batch_size = theta.size()[0]
-        out_size = torch.Size((batch_size, self.out_ch, self.out_h, self.out_w))
-        return F.affine_grid(theta, out_size, align_corners=False)
-
-def theta2homogeneous(theta):
-    """Convert 2x3 affine matrix to 3x3 homogeneous matrix."""
+    Returns:
+        Homogeneous matrix (B, 3, 3).
+    """
     batch_size = theta.size(0)
-    device = theta.device
     theta = theta.view(-1, 2, 3)
-    homogeneous_row = torch.tensor([[0, 0, 1]], dtype=theta.dtype, device=device)
-    homogeneous_row = homogeneous_row.expand(batch_size, 1, 3)
-    theta = torch.cat((theta, homogeneous_row), dim=1)
-    return theta
+
+    homogeneous_row = torch.tensor(
+        [[0.0, 0.0, 1.0]],
+        dtype=theta.dtype,
+        device=theta.device,
+    ).expand(batch_size, 1, 3)
+
+    return torch.cat([theta, homogeneous_row], dim=1)

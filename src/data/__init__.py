@@ -1,13 +1,13 @@
 """Data loading and dataset utilities."""
 
-from .synth_dataset import SynthDataset
-from .pck_dataset import GoogleEarthPCK, GoogleEarthPCK_v2
+from .train_dataset import TrainDataset
+from .eval_dataset import PCKEvalDataset, PCKEvalDatasetV2
 from .download import download_train, download_eval
 
 __all__ = [
-    "SynthDataset",
-    "GoogleEarthPCK",
-    "GoogleEarthPCK_v2",
+    "TrainDataset",
+    "PCKEvalDataset",
+    "PCKEvalDatasetV2",
     "download_train",
     "download_eval",
 ]

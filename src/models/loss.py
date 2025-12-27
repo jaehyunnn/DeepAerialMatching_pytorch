@@ -40,14 +40,14 @@ class TransformedGridLoss(nn.Module):
             theta_GT_BA = theta_GT_mat_inv[:, :2, :].reshape(-1, 6)
 
             # compute transformed grid points using estimated and GT tnfs
-            P_prime_GT = self.pointTnf.affPointTnf(theta_GT_AB, P)
-            P_prime_GT_inv = self.pointTnf.affPointTnf(theta_GT_BA, P)
+            P_prime_GT = self.pointTnf.affine_transform(theta_GT_AB, P)
+            P_prime_GT_inv = self.pointTnf.affine_transform(theta_GT_BA, P)
 
-            P_prime_original = self.pointTnf.affPointTnf(theta_AB, P)
-            P_prime_original_inv = self.pointTnf.affPointTnf(theta_BA, P)
+            P_prime_original = self.pointTnf.affine_transform(theta_AB, P)
+            P_prime_original_inv = self.pointTnf.affine_transform(theta_BA, P)
 
-            P_prime_jittered = self.pointTnf.affPointTnf(theta_AC, P)
-            P_prime_jittered_inv = self.pointTnf.affPointTnf(theta_CA, P)
+            P_prime_jittered = self.pointTnf.affine_transform(theta_AC, P)
+            P_prime_jittered_inv = self.pointTnf.affine_transform(theta_CA, P)
 
         # compute MSE loss on transformed grid points
         l_original = torch.sum(torch.pow(P_prime_original - P_prime_GT, 2), 1) + \

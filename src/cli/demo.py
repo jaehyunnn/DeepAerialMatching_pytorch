@@ -1,164 +1,316 @@
-from __future__ import print_function, division
+"""Deep Aerial Matching demo script."""
+from __future__ import annotations
+
+import argparse
 import os
 import sys
 import time
 import warnings
+from dataclasses import dataclass
 
 # Add src to path for direct script execution
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from torchvision.transforms import Normalize
-import torch
-import matplotlib.pyplot as plt
-from skimage import io
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from skimage import io
+from torchvision.transforms import Normalize
 
 from models import AerialNetSingleStream
 from preprocessing import normalize_image
 from transforms import GeometricTnf, theta2homogeneous
-from utils import print_info, load_checkpoint, createCheckBoard
+from utils import load_checkpoint, create_checkerboard
 
 warnings.filterwarnings('ignore')
 
-# torch.cuda.set_device(1) # Using second GPU
 
-### Parameter
-feature_extraction_cnn = 'se_resnext101'
-model_path = 'checkpoints/checkpoint_seresnext101.pt'
+@dataclass
+class DemoConfig:
+    """Demo configuration."""
+    # Model
+    backbone: str = 'se_resnext101'
+    model_path: str = 'checkpoints/checkpoint_seresnext101.pt'
+    correlation_type: str = 'dot'
 
-source_image_path='datasets/demo_img/00_src.jpg'
-target_image_path='datasets/demo_img/00_tgt.jpg'
+    # Images
+    source_image: str = 'datasets/demo_img/00_src.jpg'
+    target_image: str = 'datasets/demo_img/00_tgt.jpg'
 
-### Load models
-use_cuda = torch.cuda.is_available()
-device = torch.device('cuda' if use_cuda else 'cpu')
-
-# Create model
-print('Creating CNN model...')
-model = AerialNetSingleStream(use_cuda=use_cuda, geometric_model='affine', feature_extraction_cnn=feature_extraction_cnn)
-
-# Load trained weights (only FeatureRegression, FeatureExtraction uses timm pretrained)
-print('Loading trained model weights...')
-load_checkpoint(model, model_path, device=device)
-print("Reloading from--[%s]" % model_path)
+    # Output
+    output_dir: str = 'results'
+    show_plot: bool = True
 
 
-### Load and preprocess images
-resize = GeometricTnf(out_h=240, out_w=240, use_cuda=False)
-normalizeTnf = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+def create_model(config: DemoConfig, device: torch.device) -> AerialNetSingleStream:
+    """Create and load model."""
+    use_cuda = device.type == 'cuda'
 
-def Im2Tensor(image):
-    image = np.expand_dims(image.transpose((2, 0, 1)), 0)
-    image = torch.Tensor(image.astype(np.float32) / 255.0)
-    return image.to(device)
+    print('Creating model...')
+    model = AerialNetSingleStream(
+        use_cuda=use_cuda,
+        geometric_model='affine',
+        backbone=config.backbone,
+        correlation_type=config.correlation_type,
+    )
 
-def preprocess_image(image):
-    # convert to torch Tensor
-    image = np.expand_dims(image.transpose((2, 0, 1)), 0)
-    image = torch.Tensor(image.astype(np.float32) / 255.0)
+    print(f'Loading trained model weights from {config.model_path}...')
+    load_checkpoint(model, config.model_path, device=device)
 
-    # Resize image using bilinear sampling with identity affine tnf
-    image = resize(image)
+    return model
 
-    # Normalize image
-    image = normalize_image(image)
 
-    return image
+def load_and_preprocess_image(image_path: str, resize_tnf: GeometricTnf, device: torch.device) -> tuple:
+    """Load and preprocess an image for inference."""
+    image = io.imread(image_path)
 
-source_image = io.imread(source_image_path)
-target_image = io.imread(target_image_path)
+    # Convert to torch Tensor
+    image_tensor = np.expand_dims(image.transpose((2, 0, 1)), 0)
+    image_tensor = torch.Tensor(image_tensor.astype(np.float32) / 255.0)
 
-source_image_var = preprocess_image(source_image).to(device)
-target_image_var = preprocess_image(target_image).to(device)
-target_image = np.float32(target_image/255.)
+    # Resize and normalize
+    image_tensor = resize_tnf(image_tensor)
+    image_tensor = normalize_image(image_tensor)
 
-### Create image transformers
-affTnf = GeometricTnf(geometric_model='affine', out_h=target_image.shape[0], out_w=target_image.shape[1], use_cuda=use_cuda)
+    return image, image_tensor.to(device)
 
-batch = {'source_image': source_image_var, 'target_image':target_image_var}
 
-resizeTgt = GeometricTnf(out_h=target_image.shape[0], out_w=target_image.shape[1], use_cuda = use_cuda)
+def image_to_tensor(image: np.ndarray, device: torch.device) -> torch.Tensor:
+    """Convert numpy image to tensor."""
+    image_tensor = np.expand_dims(image.transpose((2, 0, 1)), 0)
+    image_tensor = torch.Tensor(image_tensor.astype(np.float32) / 255.0)
+    return image_tensor.to(device)
 
-### Evaluate model
-model.eval()
 
-start_time = time.time()
-# Evaluate models
-"""1st Affine"""
-theta_aff, theta_aff_inv = model(batch)
+def compute_ensemble_theta(theta: torch.Tensor, theta_inv: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """Compute ensemble of forward and inverse transformations."""
+    batch_size = theta.size(0)
+    theta_inv = theta_inv.view(-1, 2, 3)
 
-# Calculate theta_aff_2
-batch_size = theta_aff.size(0)
-theta_aff_inv = theta_aff_inv.view(-1, 2, 3)
-homogeneous_row = torch.tensor([[0, 0, 1]], dtype=theta_aff_inv.dtype, device=device).expand(batch_size, 1, 3)
-theta_aff_inv = torch.cat((theta_aff_inv, homogeneous_row), dim=1)
-theta_aff_2 = torch.linalg.inv(theta_aff_inv)[:, :2, :].reshape(-1, 6)
+    homogeneous_row = torch.tensor(
+        [[0, 0, 1]], dtype=theta_inv.dtype, device=device
+    ).expand(batch_size, 1, 3)
 
-theta_aff_ensemble = (theta_aff + theta_aff_2) / 2  # Ensemble
+    theta_inv = torch.cat((theta_inv, homogeneous_row), dim=1)
+    theta_2 = torch.linalg.inv(theta_inv)[:, :2, :].reshape(-1, 6)
 
-### Process result
-warped_image_aff = affTnf(Im2Tensor(source_image), theta_aff_ensemble.view(-1,2,3))
-result_aff_np = warped_image_aff.squeeze(0).transpose(0,1).transpose(1,2).cpu().detach().numpy()
-io.imsave('results/aff.jpg', (np.clip(result_aff_np, 0, 1) * 255).astype(np.uint8))
+    return (theta + theta_2) / 2
 
-"""2nd Affine"""
-# Preprocess source_image_2
-source_image_2 = normalize_image(resize(warped_image_aff.cpu())).to(device)
-theta_aff_aff, theta_aff_aff_inv = model({'source_image': source_image_2, 'target_image': batch['target_image']})
 
-# Calculate theta_aff_aff_2
-batch_size = theta_aff_aff.size(0)
-theta_aff_aff_inv = theta_aff_aff_inv.view(-1, 2, 3)
-homogeneous_row = torch.tensor([[0, 0, 1]], dtype=theta_aff_aff_inv.dtype, device=device).expand(batch_size, 1, 3)
-theta_aff_aff_inv = torch.cat((theta_aff_aff_inv, homogeneous_row), dim=1)
-theta_aff_aff_2 = torch.linalg.inv(theta_aff_aff_inv)[:, :2, :].reshape(-1, 6)
+def run_inference(model: AerialNetSingleStream, batch: dict, device: torch.device) -> tuple:
+    """Run two-stage affine inference."""
+    model.eval()
 
-theta_aff_aff_ensemble = (theta_aff_aff + theta_aff_aff_2) / 2  # Ensemble
+    # First affine transformation
+    theta_aff, theta_aff_inv = model(batch)
+    theta_aff_ensemble = compute_ensemble_theta(theta_aff, theta_aff_inv, device)
 
-theta_aff_ensemble = theta2homogeneous(theta_aff_ensemble)
-theta_aff_aff_ensemble = theta2homogeneous(theta_aff_aff_ensemble)
+    return theta_aff_ensemble
 
-theta = torch.bmm(theta_aff_aff_ensemble, theta_aff_ensemble).view(-1, 9)[:, :6]
 
-### Process result
-warped_image_aff_aff = affTnf(Im2Tensor(source_image), theta.view(-1,2,3))
-result_aff_aff_np = warped_image_aff_aff.squeeze(0).transpose(0,1).transpose(1,2).cpu().detach().numpy()
-io.imsave('results/aff_aff.jpg', (np.clip(result_aff_aff_np, 0, 1) * 255).astype(np.uint8))
+def run_two_stage_inference(
+    model: AerialNetSingleStream,
+    source_image: np.ndarray,
+    batch: dict,
+    resize_tnf: GeometricTnf,
+    aff_tnf: GeometricTnf,
+    device: torch.device
+) -> tuple:
+    """Run two-stage affine inference with refinement."""
+    model.eval()
 
-print()
-print_info("# ====================================== #\n"
-           "#            <Execution Time>            #\n"
-           "#            - %.4s seconds -            #"%(time.time() - start_time)+"\n"
-           "# ====================================== #",['yellow','bold'])
+    # First affine transformation
+    theta_aff, theta_aff_inv = model(batch)
+    theta_aff_ensemble = compute_ensemble_theta(theta_aff, theta_aff_inv, device)
 
-# Create overlay
-aff_overlay = cv2.addWeighted(src1=result_aff_np, alpha= 0.4, src2=target_image, beta=0.8, gamma=0)
-io.imsave('results/aff_overlay.jpg', (np.clip(aff_overlay, 0, 1) * 255).astype(np.uint8))
+    # Warp source image with first transformation
+    warped_image = aff_tnf(image_to_tensor(source_image, device), theta_aff_ensemble.view(-1, 2, 3))
 
-# Create checkboard
-aff_checkboard = createCheckBoard(result_aff_np, target_image)
-io.imsave('results/aff_checkboard.jpg', (np.clip(aff_checkboard, 0, 1) * 255).astype(np.uint8))
+    # Second affine transformation (refinement)
+    source_image_2 = normalize_image(resize_tnf(warped_image.cpu())).to(device)
+    theta_aff_aff, theta_aff_aff_inv = model({
+        'source_image': source_image_2,
+        'target_image': batch['target_image']
+    })
+    theta_aff_aff_ensemble = compute_ensemble_theta(theta_aff_aff, theta_aff_aff_inv, device)
 
-### Display
-fig, axs = plt.subplots(2,3)
-axs[0][0].imshow(source_image)
-axs[0][0].set_title('Source')
-axs[0][1].imshow(target_image)
-axs[0][1].set_title('Target')
-axs[0][2].imshow(result_aff_np)
-axs[0][2].set_title('Affine')
+    # Combine transformations
+    theta_aff_homo = theta2homogeneous(theta_aff_ensemble)
+    theta_aff_aff_homo = theta2homogeneous(theta_aff_aff_ensemble)
+    theta_combined = torch.bmm(theta_aff_aff_homo, theta_aff_homo).view(-1, 9)[:, :6]
 
-axs[1][0].imshow(result_aff_aff_np)
-axs[1][0].set_title('Affine X 2')
-axs[1][1].imshow(aff_checkboard)
-axs[1][1].set_title('Affine Checkboard')
-axs[1][2].imshow(aff_overlay)
-axs[1][2].set_title('Affine Overlay')
+    return theta_aff_ensemble, theta_combined, warped_image
 
-for i in range(2):
-    for j in range(3):
-        axs[i][j].axis('off')
-fig.set_dpi(300)
-plt.show()
 
+def save_results(
+    config: DemoConfig,
+    source_image: np.ndarray,
+    target_image: np.ndarray,
+    theta_aff: torch.Tensor,
+    theta_combined: torch.Tensor,
+    aff_tnf: GeometricTnf,
+    device: torch.device
+) -> tuple:
+    """Save result images."""
+    os.makedirs(config.output_dir, exist_ok=True)
+
+    target_float = np.float32(target_image / 255.0)
+
+    # First affine result
+    warped_aff = aff_tnf(image_to_tensor(source_image, device), theta_aff.view(-1, 2, 3))
+    result_aff = warped_aff.squeeze(0).permute(1, 2, 0).cpu().detach().numpy()
+    io.imsave(f'{config.output_dir}/aff.jpg', (np.clip(result_aff, 0, 1) * 255).astype(np.uint8))
+
+    # Two-stage affine result
+    warped_aff_aff = aff_tnf(image_to_tensor(source_image, device), theta_combined.view(-1, 2, 3))
+    result_aff_aff = warped_aff_aff.squeeze(0).permute(1, 2, 0).cpu().detach().numpy()
+    io.imsave(f'{config.output_dir}/aff_aff.jpg', (np.clip(result_aff_aff, 0, 1) * 255).astype(np.uint8))
+
+    # Overlay
+    overlay = cv2.addWeighted(src1=result_aff, alpha=0.4, src2=target_float, beta=0.8, gamma=0)
+    io.imsave(f'{config.output_dir}/aff_overlay.jpg', (np.clip(overlay, 0, 1) * 255).astype(np.uint8))
+
+    # Checkboard
+    checkboard = create_checkerboard(result_aff, target_float)
+    io.imsave(f'{config.output_dir}/aff_checkboard.jpg', (np.clip(checkboard, 0, 1) * 255).astype(np.uint8))
+
+    return result_aff, result_aff_aff, overlay, checkboard, target_float
+
+
+def display_results(
+    source_image: np.ndarray,
+    target_image: np.ndarray,
+    result_aff: np.ndarray,
+    result_aff_aff: np.ndarray,
+    checkboard: np.ndarray,
+    overlay: np.ndarray
+):
+    """Display results in a matplotlib figure."""
+    fig, axs = plt.subplots(2, 3)
+
+    axs[0][0].imshow(source_image)
+    axs[0][0].set_title('Source')
+    axs[0][1].imshow(target_image)
+    axs[0][1].set_title('Target')
+    axs[0][2].imshow(result_aff)
+    axs[0][2].set_title('Affine')
+
+    axs[1][0].imshow(result_aff_aff)
+    axs[1][0].set_title('Affine X 2')
+    axs[1][1].imshow(checkboard)
+    axs[1][1].set_title('Affine Checkboard')
+    axs[1][2].imshow(overlay)
+    axs[1][2].set_title('Affine Overlay')
+
+    for i in range(2):
+        for j in range(3):
+            axs[i][j].axis('off')
+
+    fig.set_dpi(300)
+    plt.show()
+
+
+def run_demo(config: DemoConfig):
+    """Run the demo pipeline."""
+    use_cuda = torch.cuda.is_available()
+    device = torch.device('cuda' if use_cuda else 'cpu')
+
+    # Create model
+    model = create_model(config, device)
+
+    # Create transforms
+    resize_tnf = GeometricTnf(out_h=240, out_w=240, use_cuda=False)
+
+    # Load images
+    source_image, source_tensor = load_and_preprocess_image(
+        config.source_image, resize_tnf, device
+    )
+    target_image, target_tensor = load_and_preprocess_image(
+        config.target_image, resize_tnf, device
+    )
+
+    # Create affine transform for output size
+    aff_tnf = GeometricTnf(
+        geometric_model='affine',
+        out_h=target_image.shape[0],
+        out_w=target_image.shape[1],
+        use_cuda=use_cuda
+    )
+
+    # Prepare batch
+    batch = {'source_image': source_tensor, 'target_image': target_tensor}
+
+    # Run inference
+    start_time = time.time()
+    theta_aff, theta_combined, _ = run_two_stage_inference(
+        model, source_image, batch, resize_tnf, aff_tnf, device
+    )
+    elapsed = time.time() - start_time
+
+    print(f'\nExecution time: {elapsed:.4f} seconds')
+
+    # Save results
+    result_aff, result_aff_aff, overlay, checkboard, target_float = save_results(
+        config, source_image, target_image, theta_aff, theta_combined, aff_tnf, device
+    )
+
+    print(f'Results saved to {config.output_dir}/')
+
+    # Display results
+    if config.show_plot:
+        display_results(source_image, target_float, result_aff, result_aff_aff, checkboard, overlay)
+
+    print('Done!')
+
+
+def parse_args() -> DemoConfig:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Deep Aerial Matching Demo',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    # Model
+    parser.add_argument('--backbone', type=str, default='se_resnext101',
+                        choices=['resnet101', 'resnext101', 'se_resnext101', 'densenet169', 'dinov3'],
+                        help='Feature extraction backbone')
+    parser.add_argument('--model', type=str, default='checkpoints/checkpoint_seresnext101.pt',
+                        help='Path to model checkpoint')
+    parser.add_argument('--correlation-type', type=str, default='dot',
+                        choices=['dot', 'cross_attention'],
+                        help='Correlation type (dot: simple dot product, cross_attention: LoFTR-style)')
+
+    # Images
+    parser.add_argument('--source', type=str, default='datasets/demo_img/00_src.jpg',
+                        help='Path to source image')
+    parser.add_argument('--target', type=str, default='datasets/demo_img/00_tgt.jpg',
+                        help='Path to target image')
+
+    # Output
+    parser.add_argument('--output-dir', type=str, default='results',
+                        help='Directory to save results')
+    parser.add_argument('--no-display', action='store_true',
+                        help='Do not display results (headless mode)')
+
+    args = parser.parse_args()
+
+    return DemoConfig(
+        backbone=args.backbone,
+        model_path=args.model,
+        correlation_type=args.correlation_type,
+        source_image=args.source,
+        target_image=args.target,
+        output_dir=args.output_dir,
+        show_plot=not args.no_display,
+    )
+
+
+def main():
+    """Main entry point."""
+    config = parse_args()
+    run_demo(config)
+
+
+if __name__ == '__main__':
+    main()

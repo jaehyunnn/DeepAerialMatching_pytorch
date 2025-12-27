@@ -1,153 +1,91 @@
-from __future__ import print_function, division
+"""Aerial image matching networks."""
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import timm
 
+from .backbone import FeatureExtraction
+from .correlation import FeatureCorrelation, CrossAttentionCorrelation
+from .layers import FeatureL2Norm, FeatureRegression
 
-class FeatureExtraction(nn.Module):
-    """Feature extraction using timm backbones with manual layer selection."""
-
-    def __init__(self, train_fe=True, use_cuda=True, feature_extraction_cnn='vgg'):
-        super(FeatureExtraction, self).__init__()
-
-        if feature_extraction_cnn == 'vgg':
-            full_model = timm.create_model('vgg16', pretrained=True)
-            # Extract features up to pool4 (15x15 output for 240x240 input)
-            self.model = nn.Sequential(*list(full_model.features.children())[:24])
-
-        elif feature_extraction_cnn == 'resnet101':
-            full_model = timm.create_model('resnet101', pretrained=True)
-            self.model = nn.Sequential(
-                full_model.conv1,
-                full_model.bn1,
-                full_model.act1,
-                full_model.maxpool,
-                full_model.layer1,
-                full_model.layer2,
-                full_model.layer3,
-            )
-
-        elif feature_extraction_cnn == 'resnext101':
-            full_model = timm.create_model('resnext101_32x4d', pretrained=True)
-            self.model = nn.Sequential(
-                full_model.conv1,
-                full_model.bn1,
-                full_model.act1,
-                full_model.maxpool,
-                full_model.layer1,
-                full_model.layer2,
-                full_model.layer3,
-            )
-
-        elif feature_extraction_cnn == 'se_resnext101':
-            full_model = timm.create_model('seresnext101_32x4d', pretrained=True)
-            self.model = nn.Sequential(
-                full_model.conv1,
-                full_model.bn1,
-                full_model.act1,
-                full_model.maxpool,
-                full_model.layer1,
-                full_model.layer2,
-                full_model.layer3,
-            )
-
-        elif feature_extraction_cnn == 'densenet169':
-            full_model = timm.create_model('densenet169', pretrained=True)
-            # Extract up to denseblock3 (indices 0-7, 15x15 output for 240x240 input)
-            self.model = nn.Sequential(*list(full_model.features.children())[:8])
-
-        else:
-            raise ValueError(f"Unknown backbone: {feature_extraction_cnn}")
-
-        if not train_fe:
-            for param in self.model.parameters():
-                param.requires_grad = False
-
-        if use_cuda:
-            self.model.cuda()
-
-    def forward(self, image_batch):
-        return self.model(image_batch)
-
-class FeatureL2Norm(torch.nn.Module):
-    def __init__(self):
-        super(FeatureL2Norm, self).__init__()
-
-    def forward(self, feature):
-        return F.normalize(feature, p=2, dim=1, eps=1e-6)
-
-
-class FeatureCorrelation(torch.nn.Module):
-    def __init__(self):
-        super(FeatureCorrelation, self).__init__()
-
-    def forward(self, feature_A, feature_B):
-        b, c, h, w = feature_A.size()
-        # reshape features for matrix multiplication
-        feature_A = feature_A.transpose(2, 3).contiguous().view(b, c, h * w)
-        feature_B = feature_B.view(b, c, h * w).transpose(1, 2)
-        # perform matrix mult.
-        feature_mul = torch.bmm(feature_B, feature_A)
-        correlation_tensor = feature_mul.view(b, h, w, h * w).transpose(2, 3).transpose(1, 2)
-        return correlation_tensor
-
-
-class FeatureRegression(nn.Module):
-    def __init__(self, output_dim=6, use_cuda=True):
-        super(FeatureRegression, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(15 * 15, 128, kernel_size=7, padding=0),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 64, kernel_size=5, padding=0),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-        )
-        self.linear = nn.Linear(64 * 5 * 5, output_dim)
-        if use_cuda:
-            self.conv.cuda()
-            self.linear.cuda()
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = x.reshape(x.size(0), -1)
-        x = self.linear(x)
-        return x
 
 class AerialNetBase(nn.Module):
     """Base class for aerial image matching networks."""
 
-    def __init__(self, geometric_model='affine', normalize_features=True,
-                 normalize_matches=True, use_cuda=True,
-                 feature_extraction_cnn='se_resnext101', train_fe=False):
-        super(AerialNetBase, self).__init__()
+    # Backbone output channels for feature projection
+    BACKBONE_CHANNELS = {
+        'vgg': 512,
+        'resnet101': 1024,
+        'resnext101': 1024,
+        'se_resnext101': 1024,
+        'densenet169': 1280,
+        'dinov3': 1024,
+    }
+
+    def __init__(
+        self,
+        geometric_model: str = 'affine',
+        normalize_features: bool = True,
+        normalize_matches: bool = True,
+        use_cuda: bool = True,
+        backbone: str = 'dinov3',
+        freeze_backbone: bool = True,
+        correlation_type: str = 'dot',
+        add_coord: bool = False,
+    ):
+        super().__init__()
         self.use_cuda = use_cuda
         self.normalize_features = normalize_features
         self.normalize_matches = normalize_matches
-        self.FeatureExtraction = FeatureExtraction(
-            train_fe=train_fe, use_cuda=use_cuda,
-            feature_extraction_cnn=feature_extraction_cnn
-        )
-        self.FeatureL2Norm = FeatureL2Norm()
-        self.FeatureCorrelation = FeatureCorrelation()
-        output_dim = 6 if geometric_model == 'affine' else 6
-        self.FeatureRegression = FeatureRegression(output_dim, use_cuda=use_cuda)
-        self.ReLU = nn.ReLU(inplace=True)
+        self.correlation_type = correlation_type
 
-    def extract_features(self, image):
+        self.feature_extraction = FeatureExtraction(
+            backbone=backbone,
+            freeze_backbone=freeze_backbone,
+            use_cuda=use_cuda,
+        )
+        self.l2_norm = FeatureL2Norm()
+
+        # Setup correlation module based on type
+        if correlation_type == 'cross_attention':
+            d_model = 256
+            in_channels = self.BACKBONE_CHANNELS.get(backbone, 1024)
+            self.feature_proj = nn.Conv2d(in_channels, d_model, kernel_size=1)
+            self.correlation = CrossAttentionCorrelation(
+                d_model=d_model,
+                num_heads=8,
+                num_layers=4,
+                use_cuda=use_cuda,
+            )
+            if use_cuda:
+                self.feature_proj.cuda()
+        else:
+            self.feature_proj = None
+            self.correlation = FeatureCorrelation()
+
+        output_dim = 6 if geometric_model == 'affine' else 6
+        self.regression = FeatureRegression(output_dim, use_cuda=use_cuda, add_coord=add_coord)
+        self.relu = nn.ReLU(inplace=True)
+
+    def extract_features(self, image: torch.Tensor) -> torch.Tensor:
         """Extract and optionally normalize features from image."""
-        features = self.FeatureExtraction(image)
+        features = self.feature_extraction(image)
         if self.normalize_features:
-            features = self.FeatureL2Norm(features)
+            features = self.l2_norm(features)
         return features
 
-    def compute_correlation(self, feature_A, feature_B):
+    def compute_correlation(self, feature_A: torch.Tensor, feature_B: torch.Tensor) -> torch.Tensor:
         """Compute correlation between features and optionally normalize."""
-        correlation = self.FeatureCorrelation(feature_A, feature_B)
+        # Project features if using cross-attention
+        if self.feature_proj is not None:
+            feature_A = self.feature_proj(feature_A)
+            feature_B = self.feature_proj(feature_B)
+
+        corr = self.correlation(feature_A, feature_B)
+
         if self.normalize_matches:
-            correlation = self.FeatureL2Norm(self.ReLU(correlation))
-        return correlation
+            corr = self.l2_norm(self.relu(corr))
+        return corr
 
 
 class AerialNetSingleStream(AerialNetBase):
@@ -157,18 +95,18 @@ class AerialNetSingleStream(AerialNetBase):
     between source and target images.
     """
 
-    def forward(self, tnf_batch):
+    def forward(self, tnf_batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
         # Extract features
         feature_A = self.extract_features(tnf_batch['source_image'])
         feature_B = self.extract_features(tnf_batch['target_image'])
 
         # Compute bidirectional correlation
-        correlation_AB = self.compute_correlation(feature_A, feature_B)
-        correlation_BA = self.compute_correlation(feature_B, feature_A)
+        corr_AB = self.compute_correlation(feature_A, feature_B)
+        corr_BA = self.compute_correlation(feature_B, feature_A)
 
         # Regress transformation parameters
-        theta_AB = self.FeatureRegression(correlation_AB)
-        theta_BA = self.FeatureRegression(correlation_BA)
+        theta_AB = self.regression(corr_AB)
+        theta_BA = self.regression(corr_BA)
 
         return theta_AB, theta_BA
 
@@ -180,24 +118,24 @@ class AerialNetTwoStream(AerialNetBase):
     improved robustness during training.
     """
 
-    def forward(self, tnf_batch):
+    def forward(self, tnf_batch: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # Extract features from all images
         feature_A = self.extract_features(tnf_batch['source_image'])
         feature_B = self.extract_features(tnf_batch['target_image'])
         feature_C = self.extract_features(tnf_batch['target_image_jit'])
 
         # Compute bidirectional correlation for original pair
-        correlation_AB = self.compute_correlation(feature_A, feature_B)
-        correlation_BA = self.compute_correlation(feature_B, feature_A)
+        corr_AB = self.compute_correlation(feature_A, feature_B)
+        corr_BA = self.compute_correlation(feature_B, feature_A)
 
         # Compute bidirectional correlation for jittered pair
-        correlation_AC = self.compute_correlation(feature_A, feature_C)
-        correlation_CA = self.compute_correlation(feature_C, feature_A)
+        corr_AC = self.compute_correlation(feature_A, feature_C)
+        corr_CA = self.compute_correlation(feature_C, feature_A)
 
         # Regress transformation parameters
-        theta_AB = self.FeatureRegression(correlation_AB)
-        theta_BA = self.FeatureRegression(correlation_BA)
-        theta_AC = self.FeatureRegression(correlation_AC)
-        theta_CA = self.FeatureRegression(correlation_CA)
+        theta_AB = self.regression(corr_AB)
+        theta_BA = self.regression(corr_BA)
+        theta_AC = self.regression(corr_AC)
+        theta_CA = self.regression(corr_CA)
 
         return theta_AB, theta_BA, theta_AC, theta_CA

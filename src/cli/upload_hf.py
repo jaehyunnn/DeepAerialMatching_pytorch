@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 """Upload trained models and datasets to Hugging Face Hub."""
+from __future__ import annotations
 
 import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add src to path for direct script execution
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from huggingface_hub import HfApi, create_repo
 
@@ -20,13 +22,12 @@ MODELS = {
 }
 
 DATASETS = {
-    "current.zip": "Training data - Current aerial images",
-    "past.zip": "Training data - Past aerial images",
-    "GoogleEarth_pck.zip": "Evaluation data - GoogleEarth PCK benchmark",
+    "training_data.tar.gz": "Training data (18K pairs with CSV)",
+    "evaluation_data.tar.gz": "Evaluation benchmark (500 pairs)",
 }
 
 
-def upload_models(api: HfApi):
+def upload_models(api: HfApi) -> None:
     """Upload model checkpoints."""
     print("\n=== Uploading Models ===")
 
@@ -49,8 +50,8 @@ def upload_models(api: HfApi):
             print(f"  Error: {e}")
 
 
-def upload_datasets(api: HfApi):
-    """Upload dataset zip files."""
+def upload_datasets(api: HfApi) -> None:
+    """Upload dataset archive files."""
     print("\n=== Uploading Datasets ===")
 
     for filename, description in DATASETS.items():
@@ -72,14 +73,26 @@ def upload_datasets(api: HfApi):
             print(f"  Error: {e}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Upload to Hugging Face Hub")
-    parser.add_argument('--models', action='store_true',
-                        help='Upload only models')
-    parser.add_argument('--datasets', action='store_true',
-                        help='Upload only datasets')
-    args = parser.parse_args()
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Upload trained models and datasets to Hugging Face Hub",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        '--models', action='store_true',
+        help='Upload only models',
+    )
+    parser.add_argument(
+        '--datasets', action='store_true',
+        help='Upload only datasets',
+    )
+    return parser.parse_args()
 
+
+def main():
+    """Main entry point."""
+    args = parse_args()
     api = HfApi()
 
     # Create repo if not exists
