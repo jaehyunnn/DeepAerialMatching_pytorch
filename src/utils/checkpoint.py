@@ -1,10 +1,18 @@
 """Checkpoint save/load utilities."""
 from __future__ import annotations
 
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 import torch.nn as nn
+
+
+@dataclass
+class _PlaceholderConfig:
+    """Placeholder dataclass for TrainConfig and similar classes."""
+    pass
 
 
 def save_checkpoint(state: dict, file_path: str | Path) -> None:
@@ -62,6 +70,11 @@ def load_checkpoint(
     Returns:
         The checkpoint dict (for accessing epoch, optimizer state, etc.).
     """
+    # Inject placeholder class for TrainConfig to handle checkpoints saved with it
+    main_module = sys.modules.get('__main__')
+    if main_module and not hasattr(main_module, 'TrainConfig'):
+        setattr(main_module, 'TrainConfig', _PlaceholderConfig)
+
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     # Handle different checkpoint formats
