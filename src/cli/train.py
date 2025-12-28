@@ -111,7 +111,7 @@ def create_model(config: TrainConfig, device: torch.device) -> AerialNetTwoStrea
     )
 
     if config.resume_from and os.path.exists(config.resume_from):
-        checkpoint = torch.load(config.resume_from, map_location='cpu')
+        checkpoint = torch.load(config.resume_from, map_location='cpu', weights_only=False)
         model.load_state_dict(checkpoint['state_dict'])
 
     return model
