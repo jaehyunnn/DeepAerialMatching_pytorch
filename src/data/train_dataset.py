@@ -61,8 +61,8 @@ class TrainDataset(Dataset):
         self.trg_img_names = self.data.iloc[:, 1]
         self.theta_array = self.data.iloc[:, 2:].values.astype('float')
 
-        # Image transforms
-        self.resize_tnf = GeometricTnf(out_h=self.out_h, out_w=self.out_w, use_cuda=False)
+        # Image transforms (use CPU in dataloader workers)
+        self.resize_tnf = GeometricTnf(out_h=self.out_h, out_w=self.out_w, device=torch.device('cpu'))
         self.color_jitter = transforms.ColorJitter(
             brightness=0.4, contrast=1, saturation=1, hue=0.1
         )
@@ -152,8 +152,8 @@ class TrainDataset(Dataset):
         """
         cfg = self.random_config
 
-        # Random rotation angle
-        alpha = (np.random.rand(1) - 0.5) * 2 * np.pi * cfg.rotation
+        # Random rotation angle (scalar)
+        alpha = (np.random.rand() - 0.5) * 2 * np.pi * cfg.rotation
 
         # Generate random parameters
         theta = np.random.rand(6)
@@ -163,11 +163,12 @@ class TrainDataset(Dataset):
 
         # Rotation and scale
         cos_a, sin_a = np.cos(alpha), np.sin(alpha)
-        scale_factor = 1 + (theta[:2] - 0.5) * 2 * cfg.scale
+        scale_x = 1 + (theta[0] - 0.5) * 2 * cfg.scale
+        scale_y = 1 + (theta[1] - 0.5) * 2 * cfg.scale
 
-        theta[0] = scale_factor[0] * cos_a
-        theta[1] = scale_factor[0] * (-sin_a)
-        theta[3] = scale_factor[1] * sin_a
-        theta[4] = scale_factor[1] * cos_a
+        theta[0] = scale_x * cos_a
+        theta[1] = scale_x * (-sin_a)
+        theta[3] = scale_y * sin_a
+        theta[4] = scale_y * cos_a
 
         return theta.reshape(2, 3)

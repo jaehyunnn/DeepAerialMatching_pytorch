@@ -16,7 +16,7 @@ from tqdm import tqdm
 from models import AerialNetSingleStream
 from data import PCKEvalDataset, download_eval
 from preprocessing import NormalizeImageDict
-from utils import BatchToDevice, load_checkpoint
+from utils import BatchToDevice, load_checkpoint, get_device, get_device_name
 from transforms import GeometricTnf, SynthPairTnfPCK, PointTnf, points_to_unit_coords, points_to_pixel_coords
 
 
@@ -49,11 +49,9 @@ class PCKResults:
 
 def create_model(config: EvalConfig, device: torch.device) -> AerialNetSingleStream:
     """Create and load model."""
-    use_cuda = device.type == 'cuda'
-
     print('Creating model...')
     model = AerialNetSingleStream(
-        use_cuda=use_cuda,
+        device=device,
         geometric_model='affine',
         backbone=config.backbone,
         correlation_type=config.correlation_type,
@@ -65,7 +63,7 @@ def create_model(config: EvalConfig, device: torch.device) -> AerialNetSingleStr
     return model
 
 
-def create_dataloader(config: EvalConfig, use_cuda: bool) -> DataLoader:
+def create_dataloader(config: EvalConfig, device: torch.device) -> DataLoader:
     """Create evaluation dataloader."""
     # Download dataset if needed
     download_eval('datasets')
@@ -76,7 +74,8 @@ def create_dataloader(config: EvalConfig, use_cuda: bool) -> DataLoader:
         transform=NormalizeImageDict(['source_image', 'target_image'])
     )
 
-    batch_size = config.batch_size if use_cuda else 1
+    # Use larger batch size for GPU acceleration
+    batch_size = config.batch_size if device.type != 'cpu' else 1
 
     dataloader = DataLoader(
         dataset,
@@ -184,20 +183,21 @@ def evaluate_batch(
 
 def run_evaluation(config: EvalConfig) -> PCKResults:
     """Run the evaluation pipeline."""
-    use_cuda = torch.cuda.is_available()
-    device = torch.device('cuda' if use_cuda else 'cpu')
+    # Auto-detect device (CUDA > MPS > CPU)
+    device = get_device()
+    print(f'Using device: {get_device_name()}')
 
     # Create model
     model = create_model(config, device)
 
     # Create dataloader
-    dataloader, dataset_size = create_dataloader(config, use_cuda)
+    dataloader, dataset_size = create_dataloader(config, device)
 
     # Create transforms
-    pair_tnf = SynthPairTnfPCK(geometric_model='affine', use_cuda=use_cuda)
-    batch_to_device = BatchToDevice(use_cuda=use_cuda)
-    pt = PointTnf(use_cuda=use_cuda)
-    aff_tnf = GeometricTnf(geometric_model='affine', use_cuda=use_cuda)
+    pair_tnf = SynthPairTnfPCK(geometric_model='affine', device=device)
+    batch_to_device = BatchToDevice(device=device)
+    pt = PointTnf()
+    aff_tnf = GeometricTnf(geometric_model='affine', device=device)
 
     print(f'\nEvaluating on {dataset_size} pairs...')
 

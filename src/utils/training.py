@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from time import time
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch.nn as nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
+from .device import get_device
 from .tensor import BatchToDevice
 
 
@@ -19,8 +21,8 @@ def train_epoch(
     optimizer: Optimizer,
     dataloader: DataLoader,
     pair_transform: Callable,
-    use_cuda: bool = True,
-    log_interval: int = 50,
+    device: Optional[torch.device] = None,
+    show_progress: bool = True,
 ) -> float:
     """Run one training epoch.
 
@@ -31,19 +33,32 @@ def train_epoch(
         optimizer: Optimizer instance.
         dataloader: Training data loader.
         pair_transform: Transform function for generating training pairs.
-        use_cuda: Whether to use CUDA.
-        log_interval: Batches between log messages.
+        device: Device to use. If None, auto-detects (CUDA > MPS > CPU).
+        show_progress: Whether to show progress bar.
 
     Returns:
         Average training loss for the epoch.
     """
     model.train()
-    batch_to_device = BatchToDevice(use_cuda=use_cuda)
+    device = device if device is not None else get_device()
+    batch_to_device = BatchToDevice(device=device)
 
     total_loss = 0.0
     start_time = time()
 
-    for batch_idx, batch in enumerate(dataloader):
+    # Create progress bar
+    if show_progress:
+        pbar = tqdm(
+            dataloader,
+            desc=f'Epoch {epoch:3d} [Train]',
+            leave=False,
+            ncols=100,
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}'
+        )
+    else:
+        pbar = dataloader
+
+    for batch in pbar:
         optimizer.zero_grad()
 
         # Generate training pair and move to device
@@ -60,16 +75,14 @@ def train_epoch(
 
         total_loss += loss.item()
 
-        if batch_idx % log_interval == 0:
-            progress = 100.0 * batch_idx / len(dataloader)
-            print(
-                f'Train Epoch: {epoch} [{batch_idx}/{len(dataloader)} ({progress:.0f}%)]\t'
-                f'Loss: {loss.item():.6f}'
-            )
+        if show_progress:
+            pbar.set_postfix({'loss': f'{loss.item():.4f}'})
 
     avg_loss = total_loss / len(dataloader)
     elapsed = time() - start_time
-    print(f'Train set: Average loss: {avg_loss:.4f} --- {elapsed:.2f}s')
+
+    if show_progress:
+        tqdm.write(f'  Train Loss: {avg_loss:.4f} ({elapsed:.1f}s)')
 
     return avg_loss
 
@@ -79,7 +92,8 @@ def validate(
     loss_fn: nn.Module,
     dataloader: DataLoader,
     pair_transform: Callable,
-    use_cuda: bool = True,
+    device: Optional[torch.device] = None,
+    show_progress: bool = True,
 ) -> float:
     """Run validation on the dataset.
 
@@ -88,18 +102,32 @@ def validate(
         loss_fn: Loss function module.
         dataloader: Validation data loader.
         pair_transform: Transform function for generating validation pairs.
-        use_cuda: Whether to use CUDA.
+        device: Device to use. If None, auto-detects (CUDA > MPS > CPU).
+        show_progress: Whether to show progress bar.
 
     Returns:
         Average validation loss.
     """
     model.eval()
-    batch_to_device = BatchToDevice(use_cuda=use_cuda)
+    device = device if device is not None else get_device()
+    batch_to_device = BatchToDevice(device=device)
 
     total_loss = 0.0
 
+    # Create progress bar
+    if show_progress:
+        pbar = tqdm(
+            dataloader,
+            desc='          [Val]  ',
+            leave=False,
+            ncols=100,
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}'
+        )
+    else:
+        pbar = dataloader
+
     with torch.no_grad():
-        for batch in dataloader:
+        for batch in pbar:
             # Generate validation pair and move to device
             batch = pair_transform(batch)
             batch = batch_to_device(batch)
@@ -110,7 +138,12 @@ def validate(
 
             total_loss += loss.item()
 
+            if show_progress:
+                pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+
     avg_loss = total_loss / len(dataloader)
-    print(f'Validation set: Average loss: {avg_loss:.4f}')
+
+    if show_progress:
+        tqdm.write(f'  Val Loss:   {avg_loss:.4f}')
 
     return avg_loss

@@ -5,14 +5,10 @@ import torch
 
 
 class PointTnf:
-    """Transform points with affine transformations.
+    """Transform points with affine transformations."""
 
-    Args:
-        use_cuda: Whether to use CUDA (kept for API compatibility).
-    """
-
-    def __init__(self, use_cuda: bool = True):
-        self.use_cuda = use_cuda
+    def __init__(self):
+        pass
 
     def affine_transform(self, theta: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
         """Apply affine transformation to points.
@@ -24,7 +20,7 @@ class PointTnf:
         Returns:
             Transformed points (B, 2, N).
         """
-        theta_mat = theta.view(-1, 2, 3)
+        theta_mat = theta.reshape(-1, 2, 3)
         # Apply rotation/scale
         warped_points = torch.bmm(theta_mat[:, :, :2], points)
         # Apply translation

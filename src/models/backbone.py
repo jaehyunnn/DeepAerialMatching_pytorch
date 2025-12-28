@@ -1,7 +1,6 @@
 """Feature extraction backbones for aerial image matching."""
 from __future__ import annotations
 
-import torch
 import torch.nn as nn
 import timm
 
@@ -23,7 +22,11 @@ class FeatureExtraction(nn.Module):
         'dinov3': 'vit_large_patch16_dinov3',
     }
 
-    def __init__(self, backbone: str = 'se_resnext101', freeze_backbone: bool = False, use_cuda: bool = True):
+    def __init__(
+        self,
+        backbone: str = 'se_resnext101',
+        freeze_backbone: bool = False,
+    ):
         super().__init__()
 
         if backbone not in self.BACKBONES:
@@ -40,9 +43,6 @@ class FeatureExtraction(nn.Module):
         if freeze_backbone:
             for param in self.model.parameters():
                 param.requires_grad = False
-
-        if use_cuda:
-            self.model.cuda()
 
     def _init_cnn_backbone(self, backbone: str):
         """Initialize CNN backbone with appropriate layer selection."""

@@ -19,7 +19,10 @@ from models import AerialNetTwoStream, TransformedGridLoss
 from data import TrainDataset, download_train
 from transforms import SynthPairTnf
 from preprocessing import NormalizeImageDict
-from utils import train_epoch, validate, save_checkpoint, str_to_bool
+from utils import (
+    train_epoch, validate, save_checkpoint, str_to_bool,
+    get_device, get_device_name,
+)
 
 
 @dataclass
@@ -97,14 +100,14 @@ def create_dataloaders(config: TrainConfig) -> tuple[DataLoader, DataLoader]:
     return train_loader, val_loader
 
 
-def create_model(config: TrainConfig, use_cuda: bool) -> AerialNetTwoStream:
+def create_model(config: TrainConfig, device: torch.device) -> AerialNetTwoStream:
     """Create and optionally load model."""
     model = AerialNetTwoStream(
         freeze_backbone=config.freeze_backbone,
         geometric_model=config.geometric_model,
         backbone=config.backbone,
         correlation_type=config.correlation_type,
-        use_cuda=use_cuda,
+        device=device,
     )
 
     if config.resume_from and os.path.exists(config.resume_from):
@@ -114,20 +117,24 @@ def create_model(config: TrainConfig, use_cuda: bool) -> AerialNetTwoStream:
     return model
 
 
-def create_loss(config: TrainConfig, use_cuda: bool) -> nn.Module:
+def create_loss(config: TrainConfig, device: torch.device) -> nn.Module:
     """Create loss function."""
     if config.use_mse_loss:
-        return nn.MSELoss()
-    return TransformedGridLoss(use_cuda=use_cuda, geometric_model=config.geometric_model)
+        loss_fn = nn.MSELoss()
+    else:
+        loss_fn = TransformedGridLoss(geometric_model=config.geometric_model)
+    return loss_fn.to(device)
 
 
 def run_training(config: TrainConfig):
     """Run the training loop."""
-    use_cuda = torch.cuda.is_available()
+    # Auto-detect device (CUDA > MPS > CPU)
+    device = get_device()
+    print(f'Using device: {get_device_name()}')
 
     # Set seed
     torch.manual_seed(config.seed)
-    if use_cuda:
+    if device.type == 'cuda':
         torch.cuda.manual_seed(config.seed)
 
     # Download dataset if needed
@@ -135,13 +142,13 @@ def run_training(config: TrainConfig):
         download_train('datasets')
 
     # Create components
-    model = create_model(config, use_cuda)
-    loss_fn = create_loss(config, use_cuda)
+    model = create_model(config, device)
+    loss_fn = create_loss(config, device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
     # Create dataloaders
     train_loader, val_loader = create_dataloaders(config)
-    pair_tnf = SynthPairTnf(geometric_model=config.geometric_model, use_cuda=use_cuda)
+    pair_tnf = SynthPairTnf(geometric_model=config.geometric_model, device=device)
 
     # Create checkpoint directory
     os.makedirs(config.checkpoint_dir, exist_ok=True)
@@ -149,12 +156,25 @@ def run_training(config: TrainConfig):
     # Training loop
     best_val_loss = float('inf')
 
+    print(f'\nTraining for {config.num_epochs} epochs...\n')
+
     for epoch in range(1, config.num_epochs + 1):
         train_loss = train_epoch(
-            epoch, model, loss_fn, optimizer,
-            train_loader, pair_tnf, log_interval=100
+            epoch=epoch,
+            model=model,
+            loss_fn=loss_fn,
+            optimizer=optimizer,
+            dataloader=train_loader,
+            pair_transform=pair_tnf,
+            device=device,
         )
-        val_loss = validate(model, loss_fn, val_loader, pair_tnf)
+        val_loss = validate(
+            model=model,
+            loss_fn=loss_fn,
+            dataloader=val_loader,
+            pair_transform=pair_tnf,
+            device=device,
+        )
 
         # Save checkpoint
         checkpoint_name = (
@@ -181,8 +201,11 @@ def run_training(config: TrainConfig):
                 'state_dict': model.state_dict(),
                 'val_loss': val_loss,
             }, best_path)
+            print(f'  ★ New best model saved (val_loss: {val_loss:.4f})')
 
-    print('Done!')
+        print()  # Blank line between epochs
+
+    print(f'Training complete! Best val_loss: {best_val_loss:.4f}')
 
 
 def parse_args() -> TrainConfig:

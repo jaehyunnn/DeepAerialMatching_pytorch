@@ -15,14 +15,16 @@ class FeatureCorrelation(nn.Module):
         b, c, h, w = feature_A.size()
 
         # Reshape for matrix multiplication
-        feature_A = feature_A.transpose(2, 3).contiguous().view(b, c, h * w)
-        feature_B = feature_B.view(b, c, h * w).transpose(1, 2)
+        feature_A = feature_A.transpose(2, 3).contiguous().reshape(b, c, h * w)
+        feature_B = feature_B.reshape(b, c, h * w).transpose(1, 2)
 
         # Compute correlation
         feature_mul = torch.bmm(feature_B, feature_A)
-        correlation = feature_mul.view(b, h, w, h * w).transpose(2, 3).transpose(1, 2)
+        correlation = feature_mul.reshape(b, h, w, h * w).transpose(2, 3).transpose(1, 2)
 
-        return correlation
+        # MPS has a bug in autograd with non-contiguous tensors during backward pass.
+        # Make output contiguous to avoid "view size not compatible" errors.
+        return correlation.contiguous()
 
 
 class PositionalEncoding2D(nn.Module):
@@ -103,9 +105,9 @@ class CrossAttentionLayer(nn.Module):
         m = key.shape[1]
 
         # Project and reshape to multi-head
-        q = self.q_proj(query).view(b, n, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(key).view(b, m, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(value).view(b, m, self.num_heads, self.head_dim).transpose(1, 2)
+        q = self.q_proj(query).reshape(b, n, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(key).reshape(b, m, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(value).reshape(b, m, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Attention
         attn = (q @ k.transpose(-2, -1)) * self.scale
@@ -130,7 +132,6 @@ class CrossAttentionCorrelation(nn.Module):
         num_heads: int = 8,
         num_layers: int = 4,
         dropout: float = 0.0,
-        use_cuda: bool = True,
     ):
         super().__init__()
         self.d_model = d_model
@@ -149,9 +150,6 @@ class CrossAttentionCorrelation(nn.Module):
         # Layer norms
         self.norm1 = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(num_layers)])
         self.norm2 = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(num_layers)])
-
-        if use_cuda:
-            self.cuda()
 
     def forward(self, feature_A: torch.Tensor, feature_B: torch.Tensor) -> torch.Tensor:
         """Compute cross-attention based correlation.
@@ -193,6 +191,6 @@ class CrossAttentionCorrelation(nn.Module):
         correlation = torch.bmm(feat_A, feat_B.transpose(1, 2))
 
         # Reshape to (B, H*W, H, W) for compatibility with FeatureRegression
-        correlation = correlation.view(b, h * w, h, w)
+        correlation = correlation.reshape(b, h * w, h, w)
 
         return correlation

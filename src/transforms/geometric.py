@@ -1,9 +1,22 @@
 """Geometric transformation utilities for image warping."""
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def _get_device(device: Optional[torch.device] = None) -> torch.device:
+    """Get device, auto-detecting if not specified."""
+    if device is not None:
+        return device
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
 
 
 class AffineGridGen(nn.Module):
@@ -42,7 +55,7 @@ class GeometricTnf:
         geometric_model: Type of geometric model ('affine').
         out_h: Output height.
         out_w: Output width.
-        use_cuda: Whether to use CUDA.
+        device: Device for computation. If None, auto-detects (CUDA > MPS > CPU).
     """
 
     def __init__(
@@ -50,19 +63,20 @@ class GeometricTnf:
         geometric_model: str = 'affine',
         out_h: int = 240,
         out_w: int = 240,
-        use_cuda: bool = True,
+        device: Optional[torch.device] = None,
     ):
         self.out_h = out_h
         self.out_w = out_w
-        self.use_cuda = use_cuda
+        self.device = _get_device(device)
 
         if geometric_model == 'affine':
             self.grid_gen = AffineGridGen(out_h, out_w)
 
         # Identity transformation matrix
-        self.theta_identity = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]])
-        if use_cuda:
-            self.theta_identity = self.theta_identity.cuda()
+        self.theta_identity = torch.tensor(
+            [[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]],
+            device=self.device,
+        )
 
     def __call__(
         self,
@@ -83,14 +97,28 @@ class GeometricTnf:
             Warped images (B, C, out_h, out_w).
         """
         batch_size = image_batch.size(0)
+        original_device = image_batch.device
 
         if theta_batch is None:
-            theta_batch = self.theta_identity.expand(batch_size, 2, 3).to(image_batch.device)
+            theta_batch = self.theta_identity.expand(batch_size, 2, 3).contiguous().to(image_batch.device)
+
+        # MPS has an intermittent bug with grid_sample that corrupts color channels
+        # under certain conditions (after model inference, specific image sizes).
+        # Run on CPU for correctness, then move back to original device.
+        # See: https://github.com/pytorch/pytorch/issues/141287
+        if original_device.type == 'mps':
+            image_batch = image_batch.cpu()
+            theta_batch = theta_batch.cpu()
 
         sampling_grid = self.grid_gen(theta_batch)
         sampling_grid = sampling_grid * padding_factor * crop_factor
 
-        return F.grid_sample(image_batch, sampling_grid, align_corners=False)
+        result = F.grid_sample(image_batch, sampling_grid, align_corners=False)
+
+        if original_device.type == 'mps':
+            result = result.to(original_device)
+
+        return result
 
 
 def symmetric_image_pad(image_batch: torch.Tensor, padding_factor: float) -> torch.Tensor:
@@ -137,7 +165,7 @@ class SynthPairTnf:
     Creates source-target pairs with geometric transformations for training.
 
     Args:
-        use_cuda: Whether to use CUDA.
+        device: Device for computation. If None, auto-detects (CUDA > MPS > CPU).
         geometric_model: Type of geometric model.
         crop_factor: Crop scale factor.
         output_size: Output image size (H, W).
@@ -146,20 +174,19 @@ class SynthPairTnf:
 
     def __init__(
         self,
-        use_cuda: bool = True,
+        device: Optional[torch.device] = None,
         geometric_model: str = 'affine',
         crop_factor: float = 9 / 16,
         output_size: tuple[int, int] = (240, 240),
         padding_factor: float = 0.5,
     ):
-        self.use_cuda = use_cuda
-        self.device = torch.device('cuda' if use_cuda else 'cpu')
+        self.device = _get_device(device)
         self.crop_factor = crop_factor
         self.padding_factor = padding_factor
         self.out_h, self.out_w = output_size
 
-        self.rescaling_tnf = GeometricTnf('affine', self.out_h, self.out_w, use_cuda=use_cuda)
-        self.geometric_tnf = GeometricTnf(geometric_model, self.out_h, self.out_w, use_cuda=use_cuda)
+        self.rescaling_tnf = GeometricTnf('affine', self.out_h, self.out_w, device=self.device)
+        self.geometric_tnf = GeometricTnf(geometric_model, self.out_h, self.out_w, device=self.device)
 
     def __call__(self, batch: dict) -> dict:
         """Apply synthetic transformation to batch.
@@ -199,7 +226,7 @@ class SynthPairTnfPCK:
     Similar to SynthPairTnf but without jittered target.
 
     Args:
-        use_cuda: Whether to use CUDA.
+        device: Device for computation. If None, auto-detects (CUDA > MPS > CPU).
         geometric_model: Type of geometric model.
         crop_factor: Crop scale factor.
         output_size: Output image size (H, W).
@@ -208,19 +235,19 @@ class SynthPairTnfPCK:
 
     def __init__(
         self,
-        use_cuda: bool = True,
+        device: Optional[torch.device] = None,
         geometric_model: str = 'affine',
         crop_factor: float = 9 / 16,
         output_size: tuple[int, int] = (240, 240),
         padding_factor: float = 0.5,
     ):
-        self.use_cuda = use_cuda
+        self.device = _get_device(device)
         self.crop_factor = crop_factor
         self.padding_factor = padding_factor
         self.out_h, self.out_w = output_size
 
-        self.rescaling_tnf = GeometricTnf('affine', self.out_h, self.out_w, use_cuda=use_cuda)
-        self.geometric_tnf = GeometricTnf(geometric_model, self.out_h, self.out_w, use_cuda=use_cuda)
+        self.rescaling_tnf = GeometricTnf('affine', self.out_h, self.out_w, device=self.device)
+        self.geometric_tnf = GeometricTnf(geometric_model, self.out_h, self.out_w, device=self.device)
 
     def __call__(self, batch: dict) -> dict:
         """Apply synthetic transformation to batch.
@@ -259,12 +286,12 @@ def theta2homogeneous(theta: torch.Tensor) -> torch.Tensor:
         Homogeneous matrix (B, 3, 3).
     """
     batch_size = theta.size(0)
-    theta = theta.view(-1, 2, 3)
+    theta = theta.reshape(-1, 2, 3)
 
     homogeneous_row = torch.tensor(
         [[0.0, 0.0, 1.0]],
         dtype=theta.dtype,
         device=theta.device,
-    ).expand(batch_size, 1, 3)
+    ).expand(batch_size, 1, 3).contiguous()
 
     return torch.cat([theta, homogeneous_row], dim=1)

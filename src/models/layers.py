@@ -16,7 +16,11 @@ class FeatureL2Norm(nn.Module):
 class FeatureRegression(nn.Module):
     """Regress transformation parameters from correlation tensor."""
 
-    def __init__(self, output_dim: int = 6, use_cuda: bool = True, add_coord: bool = False):
+    def __init__(
+        self,
+        output_dim: int = 6,
+        add_coord: bool = False,
+    ):
         super().__init__()
         self.add_coord = add_coord
 
@@ -33,10 +37,6 @@ class FeatureRegression(nn.Module):
         )
         self.linear = nn.Linear(64 * 5 * 5, output_dim)
 
-        if use_cuda:
-            self.conv.cuda()
-            self.linear.cuda()
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.add_coord:
             B, _, H, W = x.shape
@@ -47,7 +47,7 @@ class FeatureRegression(nn.Module):
                 torch.linspace(-1, 1, W, device=x.device, dtype=x.dtype),
                 indexing='ij'
             )
-            grid = torch.stack([xx, yy], dim=0).unsqueeze(0).expand(B, -1, -1, -1)
+            grid = torch.stack([xx, yy], dim=0).unsqueeze(0).expand(B, -1, -1, -1).contiguous()
 
             # Concatenate features with coordinates
             x = torch.cat([x, grid], dim=1)

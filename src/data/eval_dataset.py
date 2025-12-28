@@ -45,8 +45,8 @@ class BasePCKDataset(Dataset, ABC):
         self.trg_names = self.data.iloc[:, 1]
         self.src_point_coords = self.data.iloc[:, 2:42].values.astype('float')
 
-        # Geometric transform for resizing (no cuda in dataloader workers)
-        self.resize_tnf = GeometricTnf(out_h=self.out_h, out_w=self.out_w, use_cuda=False)
+        # Geometric transform for resizing (use CPU in dataloader workers)
+        self.resize_tnf = GeometricTnf(out_h=self.out_h, out_w=self.out_w, device=torch.device('cpu'))
 
     def __len__(self) -> int:
         return len(self.data)

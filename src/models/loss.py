@@ -1,15 +1,27 @@
-from __future__ import print_function, division
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 from transforms.point import PointTnf
 
 
 class TransformedGridLoss(nn.Module):
-    def __init__(self, geometric_model='affine', use_cuda=True, grid_size=20,
-                 alpha=0.5, beta=0.3, gamma=0.2):
+    """Grid-based loss for geometric transformation learning.
+
+    Computes loss by comparing transformed grid points between predicted
+    and ground truth transformations.
+    """
+
+    def __init__(
+        self,
+        geometric_model: str = 'affine',
+        grid_size: int = 20,
+        alpha: float = 0.5,
+        beta: float = 0.3,
+        gamma: float = 0.2,
+    ):
         super(TransformedGridLoss, self).__init__()
         self.geometric_model = geometric_model
-        self.use_cuda = use_cuda
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
@@ -22,19 +34,19 @@ class TransformedGridLoss(nn.Module):
         Y = Y.reshape(1, 1, self.N)
         P = torch.cat((X, Y), dim=1)
         self.register_buffer('P', P)
-        self.pointTnf = PointTnf(use_cuda)
+        self.pointTnf = PointTnf()
 
     def forward(self, theta_AB, theta_BA, theta_AC, theta_CA, theta_GT_AB):
         # expand grid according to batch size
         batch_size = theta_AB.size()[0]
-        P = self.P.expand(batch_size, 2, self.N)
         device = theta_AB.device
+        P = self.P.to(device).expand(batch_size, 2, self.N).contiguous()
 
         if self.geometric_model == 'affine':
-            theta_GT_mat_AB = theta_GT_AB.view(-1, 2, 3)
+            theta_GT_mat_AB = theta_GT_AB.reshape(-1, 2, 3)
             # inverse GT batch using batch matrix inverse
             homogeneous_row = torch.tensor([0, 0, 1], dtype=theta_GT_mat_AB.dtype, device=device)
-            homogeneous_row = homogeneous_row.view(1, 1, 3).expand(batch_size, 1, 3)
+            homogeneous_row = homogeneous_row.reshape(1, 1, 3).expand(batch_size, 1, 3).contiguous()
             theta_GT_mat_temp = torch.cat((theta_GT_mat_AB, homogeneous_row), dim=1)
             theta_GT_mat_inv = torch.linalg.inv(theta_GT_mat_temp)
             theta_GT_BA = theta_GT_mat_inv[:, :2, :].reshape(-1, 6)

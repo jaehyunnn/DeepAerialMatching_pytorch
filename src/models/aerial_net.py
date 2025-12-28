@@ -1,12 +1,25 @@
 """Aerial image matching networks."""
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 
 from .backbone import FeatureExtraction
 from .correlation import FeatureCorrelation, CrossAttentionCorrelation
 from .layers import FeatureL2Norm, FeatureRegression
+
+
+def _get_device(device: Optional[torch.device] = None) -> torch.device:
+    """Get device, auto-detecting if not specified."""
+    if device is not None:
+        return device
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
 
 
 class AerialNetBase(nn.Module):
@@ -27,22 +40,21 @@ class AerialNetBase(nn.Module):
         geometric_model: str = 'affine',
         normalize_features: bool = True,
         normalize_matches: bool = True,
-        use_cuda: bool = True,
+        device: Optional[torch.device] = None,
         backbone: str = 'dinov3',
         freeze_backbone: bool = True,
         correlation_type: str = 'dot',
         add_coord: bool = False,
     ):
         super().__init__()
-        self.use_cuda = use_cuda
         self.normalize_features = normalize_features
         self.normalize_matches = normalize_matches
         self.correlation_type = correlation_type
 
+        # Build model on CPU first
         self.feature_extraction = FeatureExtraction(
             backbone=backbone,
             freeze_backbone=freeze_backbone,
-            use_cuda=use_cuda,
         )
         self.l2_norm = FeatureL2Norm()
 
@@ -55,17 +67,18 @@ class AerialNetBase(nn.Module):
                 d_model=d_model,
                 num_heads=8,
                 num_layers=4,
-                use_cuda=use_cuda,
             )
-            if use_cuda:
-                self.feature_proj.cuda()
         else:
             self.feature_proj = None
             self.correlation = FeatureCorrelation()
 
         output_dim = 6 if geometric_model == 'affine' else 6
-        self.regression = FeatureRegression(output_dim, use_cuda=use_cuda, add_coord=add_coord)
+        self.regression = FeatureRegression(output_dim, add_coord=add_coord)
         self.relu = nn.ReLU(inplace=True)
+
+        # Move entire model to device at once
+        target_device = _get_device(device)
+        self.to(target_device)
 
     def extract_features(self, image: torch.Tensor) -> torch.Tensor:
         """Extract and optionally normalize features from image."""

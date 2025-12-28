@@ -21,7 +21,7 @@ from torchvision.transforms import Normalize
 from models import AerialNetSingleStream
 from preprocessing import normalize_image
 from transforms import GeometricTnf, theta2homogeneous
-from utils import load_checkpoint, create_checkerboard
+from utils import load_checkpoint, create_checkerboard, get_device, get_device_name
 
 warnings.filterwarnings('ignore')
 
@@ -45,11 +45,9 @@ class DemoConfig:
 
 def create_model(config: DemoConfig, device: torch.device) -> AerialNetSingleStream:
     """Create and load model."""
-    use_cuda = device.type == 'cuda'
-
     print('Creating model...')
     model = AerialNetSingleStream(
-        use_cuda=use_cuda,
+        device=device,
         geometric_model='affine',
         backbone=config.backbone,
         correlation_type=config.correlation_type,
@@ -160,20 +158,23 @@ def save_results(
     # First affine result
     warped_aff = aff_tnf(image_to_tensor(source_image, device), theta_aff.view(-1, 2, 3))
     result_aff = warped_aff.squeeze(0).permute(1, 2, 0).cpu().detach().numpy()
-    io.imsave(f'{config.output_dir}/aff.jpg', (np.clip(result_aff, 0, 1) * 255).astype(np.uint8))
+    result_aff = np.clip(result_aff, 0, 1)
+    io.imsave(f'{config.output_dir}/aff.jpg', (result_aff * 255).astype(np.uint8))
 
     # Two-stage affine result
     warped_aff_aff = aff_tnf(image_to_tensor(source_image, device), theta_combined.view(-1, 2, 3))
     result_aff_aff = warped_aff_aff.squeeze(0).permute(1, 2, 0).cpu().detach().numpy()
-    io.imsave(f'{config.output_dir}/aff_aff.jpg', (np.clip(result_aff_aff, 0, 1) * 255).astype(np.uint8))
+    result_aff_aff = np.clip(result_aff_aff, 0, 1)
+    io.imsave(f'{config.output_dir}/aff_aff.jpg', (result_aff_aff * 255).astype(np.uint8))
 
-    # Overlay
+    # Overlay (alpha + beta = 1.2, so clip result)
     overlay = cv2.addWeighted(src1=result_aff, alpha=0.4, src2=target_float, beta=0.8, gamma=0)
-    io.imsave(f'{config.output_dir}/aff_overlay.jpg', (np.clip(overlay, 0, 1) * 255).astype(np.uint8))
+    overlay = np.clip(overlay, 0, 1)
+    io.imsave(f'{config.output_dir}/aff_overlay.jpg', (overlay * 255).astype(np.uint8))
 
     # Checkboard
     checkboard = create_checkerboard(result_aff, target_float)
-    io.imsave(f'{config.output_dir}/aff_checkboard.jpg', (np.clip(checkboard, 0, 1) * 255).astype(np.uint8))
+    io.imsave(f'{config.output_dir}/aff_checkboard.jpg', (checkboard * 255).astype(np.uint8))
 
     return result_aff, result_aff_aff, overlay, checkboard, target_float
 
@@ -213,14 +214,15 @@ def display_results(
 
 def run_demo(config: DemoConfig):
     """Run the demo pipeline."""
-    use_cuda = torch.cuda.is_available()
-    device = torch.device('cuda' if use_cuda else 'cpu')
+    # Auto-detect device (CUDA > MPS > CPU)
+    device = get_device()
+    print(f'Using device: {get_device_name()}')
 
     # Create model
     model = create_model(config, device)
 
-    # Create transforms
-    resize_tnf = GeometricTnf(out_h=240, out_w=240, use_cuda=False)
+    # Create transforms (resize on CPU for compatibility)
+    resize_tnf = GeometricTnf(out_h=240, out_w=240, device=torch.device('cpu'))
 
     # Load images
     source_image, source_tensor = load_and_preprocess_image(
@@ -235,7 +237,7 @@ def run_demo(config: DemoConfig):
         geometric_model='affine',
         out_h=target_image.shape[0],
         out_w=target_image.shape[1],
-        use_cuda=use_cuda
+        device=device,
     )
 
     # Prepare batch

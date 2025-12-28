@@ -18,14 +18,14 @@
 DATASET="datasets/training_data"
 
 # Model
-BACKBONE="se_resnext101"          # Options: resnet101, resnext101, se_resnext101, densenet169, dinov3
+BACKBONE="dinov3"          # Options: resnet101, resnext101, se_resnext101, densenet169, dinov3
 GEOMETRIC_MODEL="affine"
-FREEZE_BACKBONE=false             # true: freeze backbone, false: train backbone
+FREEZE_BACKBONE=true             # true: freeze backbone, false: train backbone
 CORRELATION_TYPE="dot"            # Options: dot, cross_attention (LoFTR-style)
 
 # Training
 NUM_EPOCHS=100
-BATCH_SIZE=1
+BATCH_SIZE=8
 LEARNING_RATE=0.0004
 WEIGHT_DECAY=0.0
 SEED=1
