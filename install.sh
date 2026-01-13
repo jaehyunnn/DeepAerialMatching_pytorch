@@ -86,29 +86,32 @@ hf_hub_download(
 
 echo ""
 echo "Select models to download:"
-echo "  1) SE-ResNeXt101 (Recommended)"
-echo "  2) ResNeXt101"
-echo "  3) DenseNet169"
-echo "  4) ResNet101"
-echo "  5) All models"
-echo "  6) Skip"
+echo "  1) ViT-L/16 (Best, v2.0)"
+echo "  2) SE-ResNeXt101 (v1)"
+echo "  3) ResNeXt101 (v1)"
+echo "  4) DenseNet169 (v1)"
+echo "  5) ResNet101 (v1)"
+echo "  6) All models"
+echo "  7) Skip"
 echo ""
-read -p "Enter choice [1-6] (default: 1): " model_choice
+read -p "Enter choice [1-7] (default: 1): " model_choice
 model_choice=${model_choice:-1}
 
 case $model_choice in
-    1) download_model "checkpoint_seresnext101.pt" "SE-ResNeXt101" ;;
-    2) download_model "checkpoint_resnext101.pt" "ResNeXt101" ;;
-    3) download_model "checkpoint_densenet169.pt" "DenseNet169" ;;
-    4) download_model "checkpoint_resnet101.pt" "ResNet101" ;;
-    5)
+    1) download_model "checkpoint_vit-l16.pt" "ViT-L/16" ;;
+    2) download_model "checkpoint_seresnext101.pt" "SE-ResNeXt101" ;;
+    3) download_model "checkpoint_resnext101.pt" "ResNeXt101" ;;
+    4) download_model "checkpoint_densenet169.pt" "DenseNet169" ;;
+    5) download_model "checkpoint_resnet101.pt" "ResNet101" ;;
+    6)
+        download_model "checkpoint_vit-l16.pt" "ViT-L/16"
         download_model "checkpoint_seresnext101.pt" "SE-ResNeXt101"
         download_model "checkpoint_resnext101.pt" "ResNeXt101"
         download_model "checkpoint_densenet169.pt" "DenseNet169"
         download_model "checkpoint_resnet101.pt" "ResNet101"
         ;;
-    6) echo -e "${YELLOW}Skipping model download${NC}" ;;
-    *) download_model "checkpoint_seresnext101.pt" "SE-ResNeXt101" ;;
+    7) echo -e "${YELLOW}Skipping model download${NC}" ;;
+    *) download_model "checkpoint_vit-l16.pt" "ViT-L/16" ;;
 esac
 
 # Download datasets from Hugging Face

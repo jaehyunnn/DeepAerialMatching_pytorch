@@ -19,39 +19,30 @@ class FeatureRegression(nn.Module):
     def __init__(
         self,
         output_dim: int = 6,
-        add_coord: bool = False,
+        use_batch_norm: bool = False,
     ):
         super().__init__()
-        self.add_coord = add_coord
 
-        # Input channels: 15*15 correlation + 2 coord channels if add_coord
-        in_channels = 15 * 15 + 2 if add_coord else 15 * 15
+        # Input channels: 15*15 correlation
+        in_channels = 15 * 15
+
+        # v1: BatchNorm2d (legacy CNN backbones), v2: GroupNorm (modern, stable for small batches)
+        if use_batch_norm:
+            norm_layer = nn.BatchNorm2d
+        else:
+            norm_layer = lambda c: nn.GroupNorm(8, c)
 
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 128, kernel_size=7, padding=0),
-            nn.BatchNorm2d(128),
+            norm_layer(128),
             nn.ReLU(inplace=True),
             nn.Conv2d(128, 64, kernel_size=5, padding=0),
-            nn.BatchNorm2d(64),
+            norm_layer(64),
             nn.ReLU(inplace=True),
         )
         self.linear = nn.Linear(64 * 5 * 5, output_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.add_coord:
-            B, _, H, W = x.shape
-
-            # Normalized coordinates (-1 ~ 1)
-            yy, xx = torch.meshgrid(
-                torch.linspace(-1, 1, H, device=x.device, dtype=x.dtype),
-                torch.linspace(-1, 1, W, device=x.device, dtype=x.dtype),
-                indexing='ij'
-            )
-            grid = torch.stack([xx, yy], dim=0).unsqueeze(0).expand(B, -1, -1, -1).contiguous()
-
-            # Concatenate features with coordinates
-            x = torch.cat([x, grid], dim=1)
-
         x = self.conv(x)
         x = x.reshape(x.size(0), -1)
         x = self.linear(x)

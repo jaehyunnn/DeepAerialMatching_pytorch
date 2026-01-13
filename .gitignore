@@ -84,6 +84,7 @@ dmypy.json
 .ruff_cache/
 
 # Project specific
+checkpoints/
 checkpoints/*.pt
 checkpoints/*.pth
 checkpoints/*.pth.tar
@@ -106,3 +107,6 @@ Thumbs.db
 
 # For testing
 tests/
+
+# wandb
+wandb/

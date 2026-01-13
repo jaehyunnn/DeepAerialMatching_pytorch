@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from .backbone import FeatureExtraction
-from .correlation import FeatureCorrelation, CrossAttentionCorrelation
+from .correlation import FeatureCorrelation
 from .layers import FeatureL2Norm, FeatureRegression
 
 
@@ -32,7 +32,7 @@ class AerialNetBase(nn.Module):
         'resnext101': 1024,
         'se_resnext101': 1024,
         'densenet169': 1280,
-        'dinov3': 1024,
+        'vit-l/16': 1024,
     }
 
     def __init__(
@@ -41,39 +41,39 @@ class AerialNetBase(nn.Module):
         normalize_features: bool = True,
         normalize_matches: bool = True,
         device: Optional[torch.device] = None,
-        backbone: str = 'dinov3',
+        backbone: str = 'vit-l/16',
         freeze_backbone: bool = True,
-        correlation_type: str = 'dot',
-        add_coord: bool = False,
+        version: str | None = None,
+        use_grad_checkpoint: bool = False,
     ):
         super().__init__()
         self.normalize_features = normalize_features
         self.normalize_matches = normalize_matches
-        self.correlation_type = correlation_type
+
+        # Auto-detect version based on backbone if not specified
+        # v1: Legacy CNN backbones (dual_softmax=False, BatchNorm)
+        # v2: Modern ViT backbones (dual_softmax=True, GroupNorm)
+        if version is None:
+            version = 'v2' if backbone.startswith('vit-') else 'v1'
+        self.version = version
 
         # Build model on CPU first
         self.feature_extraction = FeatureExtraction(
             backbone=backbone,
             freeze_backbone=freeze_backbone,
+            use_grad_checkpoint=use_grad_checkpoint,
         )
         self.l2_norm = FeatureL2Norm()
 
-        # Setup correlation module based on type
-        if correlation_type == 'cross_attention':
-            d_model = 256
-            in_channels = self.BACKBONE_CHANNELS.get(backbone, 1024)
-            self.feature_proj = nn.Conv2d(in_channels, d_model, kernel_size=1)
-            self.correlation = CrossAttentionCorrelation(
-                d_model=d_model,
-                num_heads=8,
-                num_layers=4,
-            )
-        else:
-            self.feature_proj = None
-            self.correlation = FeatureCorrelation()
+        # Version-specific settings
+        dual_softmax = (version == 'v2')
+        use_batch_norm = (version == 'v1')
+
+        # Setup correlation module
+        self.correlation = FeatureCorrelation(dual_softmax=dual_softmax)
 
         output_dim = 6 if geometric_model == 'affine' else 6
-        self.regression = FeatureRegression(output_dim, add_coord=add_coord)
+        self.regression = FeatureRegression(output_dim, use_batch_norm=use_batch_norm)
         self.relu = nn.ReLU(inplace=True)
 
         # Move entire model to device at once
@@ -89,14 +89,9 @@ class AerialNetBase(nn.Module):
 
     def compute_correlation(self, feature_A: torch.Tensor, feature_B: torch.Tensor) -> torch.Tensor:
         """Compute correlation between features and optionally normalize."""
-        # Project features if using cross-attention
-        if self.feature_proj is not None:
-            feature_A = self.feature_proj(feature_A)
-            feature_B = self.feature_proj(feature_B)
-
         corr = self.correlation(feature_A, feature_B)
 
-        if self.normalize_matches:
+        if self.normalize_matches and not getattr(self.correlation, "dual_softmax", False):
             corr = self.l2_norm(self.relu(corr))
         return corr
 

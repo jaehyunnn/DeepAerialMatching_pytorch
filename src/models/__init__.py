@@ -6,12 +6,7 @@ from .aerial_net import (
     AerialNetBase,
 )
 from .backbone import FeatureExtraction
-from .correlation import (
-    FeatureCorrelation,
-    CrossAttentionCorrelation,
-    PositionalEncoding2D,
-    CrossAttentionLayer,
-)
+from .correlation import FeatureCorrelation
 from .layers import FeatureL2Norm, FeatureRegression
 from .loss import TransformedGridLoss
 
@@ -24,9 +19,6 @@ __all__ = [
     "FeatureExtraction",
     # Correlation
     "FeatureCorrelation",
-    "CrossAttentionCorrelation",
-    "PositionalEncoding2D",
-    "CrossAttentionLayer",
     # Layers
     "FeatureL2Norm",
     "FeatureRegression",

@@ -1,6 +1,7 @@
 """Feature extraction backbones for aerial image matching."""
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
 import timm
 
@@ -19,13 +20,14 @@ class FeatureExtraction(nn.Module):
         'resnext101': 'resnext101_32x4d',
         'se_resnext101': 'seresnext101_32x4d',
         'densenet169': 'densenet169',
-        'dinov3': 'vit_large_patch16_dinov3',
+        'vit-l/16': 'vit_large_patch16_dinov3.sat493m',
     }
 
     def __init__(
         self,
         backbone: str = 'se_resnext101',
         freeze_backbone: bool = False,
+        use_grad_checkpoint: bool = False,
     ):
         super().__init__()
 
@@ -33,7 +35,7 @@ class FeatureExtraction(nn.Module):
             raise ValueError(f"Unknown backbone: {backbone}. Supported: {list(self.BACKBONES.keys())}")
 
         self.backbone = backbone
-        self.is_vit = backbone.startswith('dino')
+        self.is_vit = backbone.startswith('vit-')
 
         if self.is_vit:
             self._init_vit_backbone(backbone)
@@ -43,6 +45,11 @@ class FeatureExtraction(nn.Module):
         if freeze_backbone:
             for param in self.model.parameters():
                 param.requires_grad = False
+
+        # Enable gradient checkpointing for memory efficiency (ViT only)
+        if use_grad_checkpoint and self.is_vit and not freeze_backbone:
+            if hasattr(self.model, 'set_grad_checkpointing'):
+                self.model.set_grad_checkpointing(enable=True)
 
     def _init_cnn_backbone(self, backbone: str):
         """Initialize CNN backbone with appropriate layer selection."""

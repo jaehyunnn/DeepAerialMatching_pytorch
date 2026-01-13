@@ -24,7 +24,7 @@ class BasePCKDataset(Dataset, ABC):
         self,
         csv_file: str,
         image_path: str,
-        output_size: tuple[int, int] = (240, 240),
+        output_size: tuple[int, int] = (512, 512),
         transform=None,
     ):
         """Initialize dataset.
@@ -108,7 +108,7 @@ class PCKEvalDataset(BasePCKDataset):
         self,
         csv_file: str,
         image_path: str,
-        output_size: tuple[int, int] = (540, 540),
+        output_size: tuple[int, int] = (512, 512),
         transform=None,
     ):
         super().__init__(csv_file, image_path, output_size, transform)
@@ -177,7 +177,7 @@ class PCKEvalDatasetV2(BasePCKDataset):
         self,
         csv_file: str,
         image_path: str,
-        output_size: tuple[int, int] = (240, 240),
+        output_size: tuple[int, int] = (512, 512),
         transform=None,
     ):
         super().__init__(csv_file, image_path, output_size, transform)

@@ -3,6 +3,7 @@
 from .checkpoint import load_checkpoint, save_checkpoint
 from .cli_utils import str_to_bool
 from .device import get_device, get_device_name, is_accelerated
+from .prefetch import CUDAPrefetcher
 from .tensor import BatchToDevice
 from .training import train_epoch, validate
 from .visualization import create_checkerboard
@@ -17,6 +18,8 @@ __all__ = [
     "get_device",
     "get_device_name",
     "is_accelerated",
+    # Prefetch
+    "CUDAPrefetcher",
     # Tensor
     "BatchToDevice",
     # Training

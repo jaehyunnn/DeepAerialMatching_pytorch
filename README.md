@@ -13,10 +13,19 @@ Official PyTorch implementation of:
 
 ## 🎁 Updates
 
-**2025-12-27 (DeepAerialNet v2.0)**
-- **DINOv3 ViT backbone**: Added `dinov3` (ViT-Large) as a new backbone option
-- **LoFTR-style cross-attention correlation**: New correlation type with transformer cross-attention and 2D positional encoding (`--correlation-type cross_attention`)
-- **CoordConv regression**: Optional normalized coordinate channels for regression head (`add_coord=True`)
+**2025-12-31 (DeepAerialNet v2.0)**
+
+*Feature Extraction*
+- **ViT backbone**: Added `vit-l/16` (ViT-Large/16 with DINOv3 sat493m pretrained weights) as a new backbone option
+
+*Feature Correlation*
+- **Dual softmax correlation**: Added dual softmax scaling to dot product correlation for improved feature matching (`v2` only)
+
+*Feature Regression*
+- **GroupNorm**: Replaced BatchNorm with GroupNorm(g=8) for stable small-batch training (`v2` only)
+
+*Training*
+- **Muon optimizer**: Added Muon optimizer for efficient transformer training (`v2` only)
 
 **2025-12-26**
 - Migrated pretrained models and datasets to [Hugging Face Hub](https://huggingface.co/jaehyunnn/DeepAerialMatching)
@@ -35,26 +44,40 @@ uv venv && source .venv/bin/activate
 uv pip install -e ".[download]"
 ```
 
-## Pretrained Models
+## Trained Models
 
 Models are hosted on [Hugging Face Hub](https://huggingface.co/jaehyunnn/DeepAerialMatching).
 
-| Backbone | PCK@0.05 | PCK@0.03 | PCK@0.01 | Download |
-|----------|----------|----------|----------|----------|
-| ResNet101 | 93.8% | 82.5% | 35.1% | [checkpoint_resnet101.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_resnet101.pt) |
-| ResNeXt101 | 94.6% | 85.9% | 43.2% | [checkpoint_resnext101.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_resnext101.pt) |
-| DenseNet169 | 95.6% | 88.4% | 44.0% | [checkpoint_densenet169.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_densenet169.pt) |
-| **SE-ResNeXt101** | **97.1%** | **91.1%** | **48.0%** | [checkpoint_seresnext101.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_seresnext101.pt) |
+| Backbone | Version | PCK@0.05 | PCK@0.03 | PCK@0.01 | Download |
+|----------|---------|----------|----------|----------|----------|
+| ResNet101 | v1 | 93.8% | 82.5% | 35.1% | [checkpoint_resnet101.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_resnet101.pt) |
+| ResNeXt101 | v1 | 94.6% | 85.9% | 43.2% | [checkpoint_resnext101.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_resnext101.pt) |
+| DenseNet169 | v1 | 95.6% | 88.4% | 44.0% | [checkpoint_densenet169.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_densenet169.pt) |
+| SE-ResNeXt101 | v1 | 97.1% | 91.1% | 48.0% | [checkpoint_seresnext101.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_seresnext101.pt) |
+| **ViT-L/16** | v2 | **99.0%** | **96.2%** | **65.7%** | [checkpoint_vit-l16.pt](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/checkpoints/checkpoint_vit-l16.pt) |
 
 **Download via Python:**
 ```python
-from huggingface_hub import hf_hub_download
+from src.data.download import download_model
 
+# Download specific model
+download_model("vit-l/16")        # ViT-L/16 (Best)
+download_model("se_resnext101")   # SE-ResNeXt101
+download_model("resnet101")       # ResNet101
+
+# Or use huggingface_hub directly
+from huggingface_hub import hf_hub_download
 hf_hub_download(
     repo_id="jaehyunnn/DeepAerialMatching",
-    filename="checkpoints/checkpoint_seresnext101.pt",
+    filename="checkpoints/checkpoint_vit-l16.pt",
     local_dir="."
 )
+```
+
+**Or via CLI:**
+```bash
+python src/data/download.py --model vit-l/16       # Download ViT-L/16
+python src/data/download.py --model se_resnext101  # Download SE-ResNeXt101
 ```
 
 ## Datasets
@@ -65,6 +88,8 @@ Datasets are also hosted on [Hugging Face Hub](https://huggingface.co/jaehyunnn/
 |---------|-------------|----------|
 | evaluation_data | Evaluation benchmark (500 pairs) | [evaluation_data.tar.gz](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/datasets/evaluation_data.tar.gz) |
 | training_data | Training data (18K pairs with CSV) | [training_data.tar.gz](https://huggingface.co/jaehyunnn/DeepAerialMatching/resolve/main/datasets/training_data.tar.gz) |
+
+> **Note:** The ViT-L/16 model was trained with an additional 27K private aerial image pairs on top of the public training dataset.
 
 **Download via Python:**
 ```python
@@ -87,7 +112,6 @@ python src/data/download.py          # All datasets
 # Demo
 ./scripts/demo.sh
 ./scripts/demo.sh --backbone resnet101 --model checkpoints/checkpoint_resnet101.pt
-./scripts/demo.sh --backbone dinov3 --correlation-type cross_attention
 
 # Evaluation
 ./scripts/eval.sh
@@ -96,23 +120,68 @@ python src/data/download.py          # All datasets
 # Training
 ./scripts/train.sh
 ./scripts/train.sh --backbone resnet101 --num-epochs 50
-./scripts/train.sh --backbone dinov3 --freeze-backbone --correlation-type cross_attention
+./scripts/train.sh --backbone vit-l/16 --freeze-backbone
+
+# Generate transformation labels
+python src/cli/generate_labels.py generate -n 10000 -t affine -o outputs/theta.csv
+python src/cli/generate_labels.py generate -n 10000 -t homography -o outputs/homo.csv
 ```
 
 ### Available Options
 
 | Option | Values | Description |
 |--------|--------|-------------|
-| `--backbone` | `resnet101`, `resnext101`, `se_resnext101`, `densenet169`, `dinov3` | Feature extraction backbone |
-| `--correlation-type` | `dot`, `cross_attention` | Correlation method (dot: simple dot product, cross_attention: LoFTR-style) |
+| `--backbone` | `resnet101`, `resnext101`, `se_resnext101`, `densenet169`, `vit-l/16` | Feature extraction backbone |
 | `--freeze-backbone` | flag | Freeze backbone weights during training |
+
+### Label Generator
+
+Generate random transformation labels for training data:
+
+```bash
+# Generate affine transformations (default: 10000 samples)
+python src/cli/generate_labels.py generate -n 10000 -t affine -o outputs/affine.csv
+
+# Generate homography transformations
+python src/cli/generate_labels.py generate -n 10000 -t homography -o outputs/homo.csv
+
+# Custom parameters
+python src/cli/generate_labels.py generate \
+    -n 5000 \
+    -t affine \
+    --max-translation 0.3 \
+    --max-scale 0.4 \
+    --max-rotation 0.25 \
+    -o outputs/custom.csv
+
+# Add rotation to existing transformations
+python src/cli/generate_labels.py add-rotation \
+    -i outputs/affine.csv \
+    --max-rotation 0.5 \
+    -o outputs/rotated.csv
+
+# Extract image pairs from directories
+python src/cli/generate_labels.py extract-pairs \
+    -s datasets/source \
+    -t datasets/target \
+    -o outputs/pairs.csv
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-n, --num-samples` | 10000 | Number of samples to generate |
+| `-t, --type` | affine | Transformation type (`affine` or `homography`) |
+| `--max-translation` | 0.5 | Maximum translation ratio |
+| `--max-scale` | 0.5 | Maximum scale ratio |
+| `--max-rotation` | 0.5 | Maximum rotation (fraction of π) |
+| `--max-perspective` | 0.1 | Maximum perspective distortion (homography only) |
 
 ### Model Architecture
 
 ```
 src/models/
 ├── backbone.py      # FeatureExtraction (CNN/ViT backbones)
-├── correlation.py   # FeatureCorrelation, CrossAttentionCorrelation
+├── correlation.py   # FeatureCorrelation
 ├── layers.py        # FeatureL2Norm, FeatureRegression
 ├── aerial_net.py    # AerialNetSingleStream, AerialNetTwoStream
 └── loss.py          # TransformedGridLoss
@@ -121,7 +190,7 @@ src/models/
 ## Requirements
 
 - Python >= 3.9
-- PyTorch >= 2.0
+- PyTorch >= 2.5
 - timm >= 1.0
 
 ## Citation

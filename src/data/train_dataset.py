@@ -42,7 +42,7 @@ class TrainDataset(Dataset):
         self,
         csv_file: str,
         image_path: str,
-        output_size: tuple[int, int] = (540, 540),
+        output_size: tuple[int, int] = (512, 512),
         geometric_model: str = 'affine',
         transform=None,
         random_sample: bool = False,
@@ -113,9 +113,13 @@ class TrainDataset(Dataset):
         return sample
 
     def _load_image(self, img_name: str) -> Image.Image:
-        """Load image from disk."""
+        """Load image from disk and convert to RGB."""
         img_path = os.path.join(self.image_path, img_name)
-        return Image.open(img_path)
+        img = Image.open(img_path)
+        # Convert to RGB if needed (handles RGBA, grayscale, etc.)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        return img
 
     def _image_to_tensor(self, image: Image.Image) -> torch.Tensor:
         """Convert PIL image to tensor with 0-255 range."""

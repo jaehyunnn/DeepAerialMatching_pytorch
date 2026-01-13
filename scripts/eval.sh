@@ -15,9 +15,9 @@
 # -----------------------------------------------------------------------------
 
 # Model
-BACKBONE="se_resnext101"          # Options: resnet101, resnext101, se_resnext101, densenet169, dinov3
+BACKBONE="se_resnext101"          # Options: resnet101, resnext101, se_resnext101, densenet169, vit-l/16
 MODEL="checkpoints/checkpoint_seresnext101.pt"
-CORRELATION_TYPE="dot"            # Options: dot, cross_attention (LoFTR-style)
+VERSION=""                        # Options: v1, v2 (empty = auto-detect based on backbone)
 
 # Dataset
 DATASET_PATH="datasets/evaluation_data"
@@ -50,9 +50,9 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  Batch size:   $BATCH_SIZE"
     echo ""
     echo -e "${YELLOW}Available options:${NC}"
-    echo "  --backbone MODEL        resnet101|resnext101|se_resnext101|densenet169|dinov3"
+    echo "  --backbone MODEL        resnet101|resnext101|se_resnext101|densenet169|vit-l/16"
     echo "  --model PATH            Path to model checkpoint"
-    echo "  --correlation-type TYPE dot|cross_attention (LoFTR-style)"
+    echo "  --version VERSION       v1|v2 (v1: BatchNorm, v2: GroupNorm+dual_softmax, auto-detect if not set)"
     echo "  --dataset-path PATH     Path to evaluation dataset"
     echo "  --batch-size N         Evaluation batch size"
     echo "  --num-workers N        Data loading workers"
@@ -77,7 +77,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --backbone) BACKBONE="$2"; shift 2 ;;
         --model) MODEL="$2"; shift 2 ;;
-        --correlation-type) CORRELATION_TYPE="$2"; shift 2 ;;
+        --version) VERSION="$2"; shift 2 ;;
         --dataset-path) DATASET_PATH="$2"; shift 2 ;;
         --batch-size) BATCH_SIZE="$2"; shift 2 ;;
         --num-workers) NUM_WORKERS="$2"; shift 2 ;;
@@ -85,18 +85,31 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if model file exists
+# Check if model file exists, if not, offer to download
 if [ ! -f "$MODEL" ]; then
-    echo -e "${RED}Error: Model file not found: $MODEL${NC}"
-    echo -e "${YELLOW}Please run install.sh first to download pretrained models.${NC}"
-    exit 1
+    echo -e "${YELLOW}Model checkpoint not found: $MODEL${NC}"
+    echo -e "${YELLOW}Would you like to download it? [y/N]${NC}"
+    read -p "> " download_choice
+
+    if [[ "$download_choice" =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}Downloading $BACKBONE checkpoint...${NC}"
+        python -c "from src.data.download import download_model; download_model('$BACKBONE')" || {
+            echo -e "${RED}Failed to download model${NC}"
+            exit 1
+        }
+    else
+        echo -e "${RED}Cannot proceed without model checkpoint${NC}"
+        exit 1
+    fi
 fi
 
 # Build arguments
 ARGS=""
 ARGS="$ARGS --backbone $BACKBONE"
 ARGS="$ARGS --model $MODEL"
-ARGS="$ARGS --correlation-type $CORRELATION_TYPE"
+if [ -n "$VERSION" ]; then
+    ARGS="$ARGS --version $VERSION"
+fi
 ARGS="$ARGS --dataset-path $DATASET_PATH"
 ARGS="$ARGS --batch-size $BATCH_SIZE"
 ARGS="$ARGS --num-workers $NUM_WORKERS"
@@ -108,7 +121,7 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}Configuration:${NC}"
 echo "  Backbone:     $BACKBONE"
-echo "  Correlation:  $CORRELATION_TYPE"
+echo "  Version:      ${VERSION:-auto}"
 echo "  Model:        $MODEL"
 echo "  Dataset:      $DATASET_PATH"
 echo "  Batch size:   $BATCH_SIZE"

@@ -115,6 +115,48 @@ def download_eval(datapath: str = "datasets"):
         print("evaluation_data already exists, skipping...")
 
 
+def download_model(backbone: str = "vit-l/16", dest_dir: str = "checkpoints"):
+    """Download pretrained model checkpoint.
+
+    Args:
+        backbone: Model backbone name (e.g., 'vit-l/16', 'resnet101', 'se_resnext101')
+        dest_dir: Directory to save checkpoint
+    """
+    # Map backbone names to checkpoint filenames
+    model_files = {
+        "vit-l/16": "checkpoints/checkpoint_vit-l16.pt",
+        "resnet101": "checkpoints/checkpoint_resnet101.pt",
+        "resnext101": "checkpoints/checkpoint_resnext101.pt",
+        "se_resnext101": "checkpoints/checkpoint_seresnext101.pt",
+        "densenet169": "checkpoints/checkpoint_densenet169.pt",
+    }
+
+    if backbone not in model_files:
+        raise ValueError(f"Unknown backbone: {backbone}. Supported: {list(model_files.keys())}")
+
+    os.makedirs(dest_dir, exist_ok=True)
+    filename = model_files[backbone]
+    dest_path = os.path.join(dest_dir, os.path.basename(filename))
+
+    # Check if already downloaded
+    if os.path.exists(dest_path):
+        print(f"{os.path.basename(filename)} already exists, skipping...")
+        return dest_path
+
+    print(f"Downloading {backbone} checkpoint...")
+
+    # Download from Hugging Face
+    checkpoint_path = hf_hub_download(
+        repo_id=HF_REPO,
+        filename=filename,
+        repo_type="model",
+        local_dir=".",
+    )
+
+    print(f"Done: {os.path.basename(filename)}")
+    return checkpoint_path
+
+
 def download_all(datapath: str = "datasets"):
     """Download all datasets (training + evaluation).
 
@@ -133,16 +175,22 @@ def download_all(datapath: str = "datasets"):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Download datasets from Hugging Face")
+    parser = argparse.ArgumentParser(description="Download datasets and models from Hugging Face")
     parser.add_argument('--datapath', type=str, default='datasets',
                         help='Directory to save datasets')
     parser.add_argument('--train', action='store_true',
                         help='Download only training data')
     parser.add_argument('--eval', action='store_true',
                         help='Download only evaluation data')
+    parser.add_argument('--model', type=str, choices=['vit-l/16', 'resnet101', 'resnext101', 'se_resnext101', 'densenet169'],
+                        help='Download pretrained model checkpoint')
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints',
+                        help='Directory to save model checkpoint')
     args = parser.parse_args()
 
-    if args.train:
+    if args.model:
+        download_model(args.model, args.checkpoint_dir)
+    elif args.train:
         download_train(args.datapath)
     elif args.eval:
         download_eval(args.datapath)

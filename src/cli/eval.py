@@ -26,7 +26,7 @@ class EvalConfig:
     # Model
     backbone: str = 'se_resnext101'
     model_path: str = 'checkpoints/checkpoint_seresnext101.pt'
-    correlation_type: str = 'dot'
+    version: str | None = None  # v1 or v2, auto-detect if None
 
     # Dataset
     dataset_path: str = 'datasets/evaluation_data'
@@ -54,7 +54,7 @@ def create_model(config: EvalConfig, device: torch.device) -> AerialNetSingleStr
         device=device,
         geometric_model='affine',
         backbone=config.backbone,
-        correlation_type=config.correlation_type,
+        version=config.version,
     )
 
     print(f'Loading trained model weights from {config.model_path}...')
@@ -261,13 +261,13 @@ def parse_args() -> EvalConfig:
 
     # Model
     parser.add_argument('--backbone', type=str, default='se_resnext101',
-                        choices=['resnet101', 'resnext101', 'se_resnext101', 'densenet169', 'dinov3'],
+                        choices=['resnet101', 'resnext101', 'se_resnext101', 'densenet169', 'vit-l/16'],
                         help='Feature extraction backbone')
     parser.add_argument('--model', type=str, default='checkpoints/checkpoint_seresnext101.pt',
                         help='Path to model checkpoint')
-    parser.add_argument('--correlation-type', type=str, default='dot',
-                        choices=['dot', 'cross_attention'],
-                        help='Correlation type (dot: simple dot product, cross_attention: LoFTR-style)')
+    parser.add_argument('--version', type=str, default=None,
+                        choices=['v1', 'v2'],
+                        help='Model version (v1: BatchNorm, v2: GroupNorm+dual_softmax, auto-detect if not set)')
 
     # Dataset
     parser.add_argument('--dataset-path', type=str, default='datasets/evaluation_data',
@@ -284,7 +284,7 @@ def parse_args() -> EvalConfig:
     return EvalConfig(
         backbone=args.backbone,
         model_path=args.model,
-        correlation_type=args.correlation_type,
+        version=args.version,
         dataset_path=args.dataset_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,

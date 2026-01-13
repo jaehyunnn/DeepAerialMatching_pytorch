@@ -32,7 +32,7 @@ class DemoConfig:
     # Model
     backbone: str = 'se_resnext101'
     model_path: str = 'checkpoints/checkpoint_seresnext101.pt'
-    correlation_type: str = 'dot'
+    version: str | None = None  # v1 or v2, auto-detect if None
 
     # Images
     source_image: str = 'datasets/demo_img/00_src.jpg'
@@ -50,7 +50,7 @@ def create_model(config: DemoConfig, device: torch.device) -> AerialNetSingleStr
         device=device,
         geometric_model='affine',
         backbone=config.backbone,
-        correlation_type=config.correlation_type,
+        version=config.version,
     )
 
     print(f'Loading trained model weights from {config.model_path}...')
@@ -275,13 +275,13 @@ def parse_args() -> DemoConfig:
 
     # Model
     parser.add_argument('--backbone', type=str, default='se_resnext101',
-                        choices=['resnet101', 'resnext101', 'se_resnext101', 'densenet169', 'dinov3'],
+                        choices=['resnet101', 'resnext101', 'se_resnext101', 'densenet169', 'vit-l/16'],
                         help='Feature extraction backbone')
     parser.add_argument('--model', type=str, default='checkpoints/checkpoint_seresnext101.pt',
                         help='Path to model checkpoint')
-    parser.add_argument('--correlation-type', type=str, default='dot',
-                        choices=['dot', 'cross_attention'],
-                        help='Correlation type (dot: simple dot product, cross_attention: LoFTR-style)')
+    parser.add_argument('--version', type=str, default=None,
+                        choices=['v1', 'v2'],
+                        help='Model version (v1: BatchNorm, v2: GroupNorm+dual_softmax, auto-detect if not set)')
 
     # Images
     parser.add_argument('--source', type=str, default='datasets/demo_img/00_src.jpg',
@@ -300,7 +300,7 @@ def parse_args() -> DemoConfig:
     return DemoConfig(
         backbone=args.backbone,
         model_path=args.model,
-        correlation_type=args.correlation_type,
+        version=args.version,
         source_image=args.source,
         target_image=args.target,
         output_dir=args.output_dir,

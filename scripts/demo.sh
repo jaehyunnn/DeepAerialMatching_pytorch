@@ -15,9 +15,9 @@
 # -----------------------------------------------------------------------------
 
 # Model
-BACKBONE="se_resnext101"          # Options: resnet101, resnext101, se_resnext101, densenet169, dinov3
+BACKBONE="se_resnext101"          # Options: resnet101, resnext101, se_resnext101, densenet169, vit-l/16
 MODEL="checkpoints/checkpoint_seresnext101.pt"
-CORRELATION_TYPE="dot"            # Options: dot, cross_attention (LoFTR-style)
+VERSION=""                        # Options: v1, v2 (empty = auto-detect based on backbone)
 
 # Images
 SOURCE_IMAGE="datasets/demo_img/00_src.jpg"
@@ -52,9 +52,9 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  Output:       $OUTPUT_DIR"
     echo ""
     echo -e "${YELLOW}Available options:${NC}"
-    echo "  --backbone MODEL        resnet101|resnext101|se_resnext101|densenet169|dinov3"
+    echo "  --backbone MODEL        resnet101|resnext101|se_resnext101|densenet169|vit-l/16"
     echo "  --model PATH            Path to model checkpoint"
-    echo "  --correlation-type TYPE dot|cross_attention (LoFTR-style)"
+    echo "  --version VERSION       v1|v2 (v1: BatchNorm, v2: GroupNorm+dual_softmax, auto-detect if not set)"
     echo "  --source PATH           Path to source image"
     echo "  --target PATH        Path to target image"
     echo "  --output-dir PATH    Directory to save results"
@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --backbone) BACKBONE="$2"; shift 2 ;;
         --model) MODEL="$2"; shift 2 ;;
-        --correlation-type) CORRELATION_TYPE="$2"; shift 2 ;;
+        --version) VERSION="$2"; shift 2 ;;
         --source) SOURCE_IMAGE="$2"; shift 2 ;;
         --target) TARGET_IMAGE="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
@@ -90,11 +90,31 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Check if model checkpoint exists, if not, offer to download
+if [ ! -f "$MODEL" ]; then
+    echo -e "${YELLOW}Model checkpoint not found: $MODEL${NC}"
+    echo -e "${YELLOW}Would you like to download it? [y/N]${NC}"
+    read -p "> " download_choice
+
+    if [[ "$download_choice" =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}Downloading $BACKBONE checkpoint...${NC}"
+        python -c "from src.data.download import download_model; download_model('$BACKBONE')" || {
+            echo -e "${RED}Failed to download model${NC}"
+            exit 1
+        }
+    else
+        echo -e "${RED}Cannot proceed without model checkpoint${NC}"
+        exit 1
+    fi
+fi
+
 # Build arguments
 ARGS=""
 ARGS="$ARGS --backbone $BACKBONE"
 ARGS="$ARGS --model $MODEL"
-ARGS="$ARGS --correlation-type $CORRELATION_TYPE"
+if [ -n "$VERSION" ]; then
+    ARGS="$ARGS --version $VERSION"
+fi
 ARGS="$ARGS --source $SOURCE_IMAGE"
 ARGS="$ARGS --target $TARGET_IMAGE"
 ARGS="$ARGS --output-dir $OUTPUT_DIR"
@@ -110,7 +130,7 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}Configuration:${NC}"
 echo "  Backbone:     $BACKBONE"
-echo "  Correlation:  $CORRELATION_TYPE"
+echo "  Version:      ${VERSION:-auto}"
 echo "  Model:        $MODEL"
 echo "  Source:       $SOURCE_IMAGE"
 echo "  Target:       $TARGET_IMAGE"
